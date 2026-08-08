@@ -160,6 +160,40 @@ function collectStatements(
       return;
     }
 
+    if (node.type === "match_expression") {
+      const block = childByType(node, "match_block");
+      for (const arm of block ? namedChildren(block) : []) {
+        if (arm.type !== "match_arm") continue;
+        const pattern =
+          childByType(arm, "match_pattern") ??
+          namedChildren(arm).find(
+            (c) =>
+              c.type !== "block" &&
+              c.type !== "call_expression" &&
+              c.type !== "identifier" &&
+              c.type !== "if_expression" &&
+              c.type !== "match_expression" &&
+              c.type !== "closure_expression",
+          ) ??
+          null;
+        // Body is the last named child that isn't the pattern / attribute
+        const kids = namedChildren(arm).filter(
+          (c) => c.type !== "attribute_item",
+        );
+        const body = kids.length > 1 ? kids[kids.length - 1]! : null;
+        const text = pattern ? collapseWs(pattern.text) : "";
+        steps.push({
+          type: "branch",
+          key: text ? `case:${text}` : "case",
+          label: text ? `case ${text}` : "case",
+          children: body
+            ? collectStatements(statementsOf(body), typeName)
+            : [],
+        });
+      }
+      return;
+    }
+
     if (node.type === "call_expression") {
       const callee = node.namedChild(0);
       if (callee) {

@@ -197,10 +197,93 @@ function collectStatements(
       return;
     }
 
+    if (node.type === "begin") {
+      // Body statements are direct children before rescue/ensure/else
+      const bodyStmts = namedChildren(node).filter(
+        (c) =>
+          c.type !== "rescue" &&
+          c.type !== "ensure" &&
+          c.type !== "else",
+      );
+      steps.push({
+        type: "branch",
+        key: "try",
+        label: "begin",
+        children: collectStatements(bodyStmts, className),
+      });
+      for (const clause of namedChildren(node)) {
+        if (clause.type === "rescue") {
+          const exceptions = childByType(clause, "exceptions");
+          const text = exceptions ? collapseWs(exceptions.text) : "";
+          const thenNode = childByType(clause, "then");
+          steps.push({
+            type: "branch",
+            key: text ? `rescue:${text}` : "rescue",
+            label: text ? `rescue ${text}` : "rescue",
+            children: thenNode
+              ? collectBody(thenNode, className)
+              : collectStatements(
+                  namedChildren(clause).filter(
+                    (c) => c.type !== "exceptions" && c.type !== "exception_variable",
+                  ),
+                  className,
+                ),
+          });
+        }
+        if (clause.type === "else") {
+          steps.push({
+            type: "branch",
+            key: "else",
+            label: "else",
+            children: collectBody(clause, className),
+          });
+        }
+        if (clause.type === "ensure") {
+          steps.push({
+            type: "branch",
+            key: "ensure",
+            label: "ensure",
+            children: collectStatements(namedChildren(clause), className),
+          });
+        }
+      }
+      return;
+    }
+
+    if (node.type === "case") {
+      for (const clause of namedChildren(node)) {
+        if (clause.type === "when") {
+          const pattern =
+            childByType(clause, "pattern") ??
+            namedChildren(clause).find((c) => c.type !== "then") ??
+            null;
+          const text = pattern ? collapseWs(pattern.text) : "";
+          steps.push({
+            type: "branch",
+            key: text ? `when:${text}` : "when",
+            label: text ? `when ${text}` : "when",
+            children: collectBody(childByType(clause, "then"), className),
+          });
+        }
+        if (clause.type === "else") {
+          steps.push({
+            type: "branch",
+            key: "else",
+            label: "else",
+            children: collectBody(clause, className),
+          });
+        }
+      }
+      return;
+    }
+
     if (node.type === "call") {
       // Ruby models `obj.attr` as `call` even without args. Count those only
       // at statement level; always count calls that pass an argument_list.
       const hasArgs = childByType(node, "argument_list") !== null;
+      const hasBlock =
+        childByType(node, "block") !== null ||
+        childByType(node, "do_block") !== null;
       const kids = namedChildren(node).filter(
         (c) =>
           c.type !== "argument_list" &&
@@ -208,7 +291,17 @@ function collectStatements(
           c.type !== "do_block",
       );
       const isReceiverCall = kids.length >= 2;
-      if (asStatement || hasArgs || !isReceiverCall) {
+      // `lambda { ... }` / `proc { ... }` are closures, not real callees
+      const bareName =
+        kids.length === 1 && kids[0]!.type === "identifier"
+          ? kids[0]!.text
+          : null;
+      const isClosureCtor =
+        hasBlock && (bareName === "lambda" || bareName === "proc");
+      if (
+        !isClosureCtor &&
+        (asStatement || hasArgs || !isReceiverCall)
+      ) {
         const key = callKey(node, className);
         if (key) addCall(key, node.startIndex);
       }

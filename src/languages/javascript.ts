@@ -197,6 +197,109 @@ function collectStatements(
       return;
     }
 
+    if (type === "try_statement") {
+      const tryBlock = childByType(node, "statement_block");
+      steps.push({
+        type: "branch",
+        key: "try",
+        label: "try",
+        children: tryBlock
+          ? collectStatements(statementsOf(tryBlock), className)
+          : [],
+      });
+      for (const clause of namedChildren(node)) {
+        if (clause.type === "catch_clause") {
+          const param =
+            childByType(clause, "identifier") ??
+            namedChildren(clause).find((c) => c.type !== "statement_block") ??
+            null;
+          const text = param ? collapseWs(param.text) : "";
+          const block = childByType(clause, "statement_block");
+          steps.push({
+            type: "branch",
+            key: text ? `catch:${text}` : "catch",
+            label: text ? `catch (${text})` : "catch",
+            children: block
+              ? collectStatements(statementsOf(block), className)
+              : [],
+          });
+        }
+        if (clause.type === "finally_clause") {
+          const block = childByType(clause, "statement_block");
+          steps.push({
+            type: "branch",
+            key: "finally",
+            label: "finally",
+            children: block
+              ? collectStatements(statementsOf(block), className)
+              : [],
+          });
+        }
+      }
+      return;
+    }
+
+    if (type === "switch_statement") {
+      const body = childByType(node, "switch_body");
+      for (const clause of body ? namedChildren(body) : []) {
+        if (clause.type === "switch_case") {
+          const value =
+            namedChildren(clause).find(
+              (c) =>
+                c.type !== "statement_block" &&
+                c.type !== "break_statement" &&
+                c.type !== "expression_statement" &&
+                c.type !== "return_statement" &&
+                c.type !== "throw_statement",
+            ) ?? null;
+          // Prefer the first non-statement child as the case value
+          const kids = namedChildren(clause);
+          const caseValue =
+            kids.find(
+              (c) =>
+                ![
+                  "expression_statement",
+                  "break_statement",
+                  "return_statement",
+                  "throw_statement",
+                  "statement_block",
+                  "lexical_declaration",
+                  "variable_declaration",
+                  "empty_statement",
+                ].includes(c.type),
+            ) ?? value;
+          const text = caseValue ? collapseWs(caseValue.text) : "";
+          const stmts = kids.filter(
+            (c) =>
+              c.type === "expression_statement" ||
+              c.type === "return_statement" ||
+              c.type === "throw_statement" ||
+              c.type === "statement_block" ||
+              c.type === "lexical_declaration" ||
+              c.type === "variable_declaration",
+          );
+          steps.push({
+            type: "branch",
+            key: text ? `case:${text}` : "case",
+            label: text ? `case ${text}` : "case",
+            children: collectStatements(stmts, className),
+          });
+        }
+        if (clause.type === "switch_default") {
+          const stmts = namedChildren(clause).filter(
+            (c) => c.type !== "break_statement",
+          );
+          steps.push({
+            type: "branch",
+            key: "default",
+            label: "default",
+            children: collectStatements(stmts, className),
+          });
+        }
+      }
+      return;
+    }
+
     if (type === "call_expression") {
       const callee = node.namedChild(0);
       if (callee) {

@@ -164,6 +164,127 @@ function collectStatements(
       return;
     }
 
+    if (node.type === "try_statement") {
+      const tryBlock = childByType(node, "block");
+      steps.push({
+        type: "branch",
+        key: "try",
+        label: "try",
+        children: tryBlock
+          ? collectStatements(statementsOf(tryBlock), className)
+          : [],
+      });
+      for (const clause of namedChildren(node)) {
+        if (clause.type === "catch_clause") {
+          const catchType =
+            childByType(clause, "catch_formal_parameter") ??
+            childByType(clause, "catch_type") ??
+            null;
+          const typeNode = catchType
+            ? (childByType(catchType, "catch_type") ??
+              childByType(catchType, "type_identifier") ??
+              catchType)
+            : null;
+          const text = typeNode
+            ? collapseWs(
+                (childByType(typeNode, "type_identifier") ?? typeNode).text,
+              )
+            : "";
+          const block = childByType(clause, "block");
+          steps.push({
+            type: "branch",
+            key: text ? `catch:${text}` : "catch",
+            label: text ? `catch (${text})` : "catch",
+            children: block
+              ? collectStatements(statementsOf(block), className)
+              : [],
+          });
+        }
+        if (clause.type === "finally_clause") {
+          const block = childByType(clause, "block");
+          steps.push({
+            type: "branch",
+            key: "finally",
+            label: "finally",
+            children: block
+              ? collectStatements(statementsOf(block), className)
+              : [],
+          });
+        }
+      }
+      return;
+    }
+
+    if (
+      node.type === "switch_expression" ||
+      node.type === "switch_statement"
+    ) {
+      const body =
+        childByType(node, "switch_block") ??
+        childByType(node, "switch_body") ??
+        null;
+      for (const group of body ? namedChildren(body) : []) {
+        if (group.type === "switch_block_statement_group") {
+          const labels = namedChildren(group).filter(
+            (c) => c.type === "switch_label",
+          );
+          const stmts = namedChildren(group).filter(
+            (c) => c.type !== "switch_label" && c.type !== "break_statement",
+          );
+          for (const label of labels) {
+            const isDefault =
+              label.namedChildCount === 0 || /\bdefault\b/.test(label.text);
+            if (isDefault) {
+              steps.push({
+                type: "branch",
+                key: "default",
+                label: "default",
+                children: collectStatements(stmts, className),
+              });
+            } else {
+              const value = label.namedChild(0);
+              const text = value ? collapseWs(value.text) : "";
+              steps.push({
+                type: "branch",
+                key: text ? `case:${text}` : "case",
+                label: text ? `case ${text}` : "case",
+                children: collectStatements(stmts, className),
+              });
+            }
+          }
+        } else if (group.type === "switch_rule") {
+          // switch expression arrow form: case 1 -> expr;
+          const label = childByType(group, "switch_label");
+          const bodyNode =
+            namedChildren(group).find((c) => c.type !== "switch_label") ?? null;
+          if (!label) continue;
+          const isDefault =
+            label.namedChildCount === 0 || /\bdefault\b/.test(label.text);
+          const children = bodyNode
+            ? collectStatements(statementsOf(bodyNode), className)
+            : [];
+          if (isDefault) {
+            steps.push({
+              type: "branch",
+              key: "default",
+              label: "default",
+              children,
+            });
+          } else {
+            const value = label.namedChild(0);
+            const text = value ? collapseWs(value.text) : "";
+            steps.push({
+              type: "branch",
+              key: text ? `case:${text}` : "case",
+              label: text ? `case ${text}` : "case",
+              children,
+            });
+          }
+        }
+      }
+      return;
+    }
+
     if (node.type === "method_invocation") {
       const key = methodInvocationKey(node, className);
       if (key) addCall(key, node.startIndex);
