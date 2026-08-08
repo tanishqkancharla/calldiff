@@ -4,13 +4,14 @@
 export function UserProfile({ userId }: { userId: string }) {
   const user = useUser(userId);
   if (!user) {
-    return <Spinner />;
+    return <Skeleton />;
   }
   return (
-    <Card>
+    <ProfileLayout>
       <Avatar src={user.avatar} />
+      <UserMeta user={user} />
       <FollowButton userId={userId} />
-    </Card>
+    </ProfileLayout>
   );
 }
 
@@ -21,15 +22,19 @@ function useUser(_id: string): { avatar: string; name: string } | null {
 
 function fetchUser(_id: string) {}
 
-function Spinner() {
+function Skeleton() {
   return null;
 }
 
-function Card(_props: { children?: unknown }) {
+function ProfileLayout(_props: { children?: unknown }) {
   return null;
 }
 
 function Avatar(_props: { src: string }) {
+  return null;
+}
+
+function UserMeta(_props: { user: { name: string } }) {
   return null;
 }
 
