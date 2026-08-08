@@ -1,7 +1,7 @@
 {
   "name": "calldiff",
-  "version": "0.1.0",
-  "description": "Diff TypeScript call stacks across git commits",
+  "version": "0.2.0",
+  "description": "Diff call stacks across git commits (TypeScript, Python, Go, and more)",
   "type": "module",
   "bin": {
     "calldiff": "./dist/cli.js"
