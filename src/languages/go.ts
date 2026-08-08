@@ -137,6 +137,16 @@ function collectStatements(
       return;
     }
 
+    if (node.type === "defer_statement") {
+      steps.push({
+        type: "branch",
+        key: "defer",
+        label: "defer",
+        children: collectStatements(namedChildren(node), receiverType),
+      });
+      return;
+    }
+
     if (
       node.type === "expression_switch_statement" ||
       node.type === "type_switch_statement"

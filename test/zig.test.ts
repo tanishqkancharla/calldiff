@@ -72,3 +72,148 @@ test("zig: self.method resolves to Type.method", ({ expectCallstack }) => {
       └─ Runner.run(self)
   `);
 });
+
+test("zig: else-if chains", ({ expectCallstack }) => {
+  expectCallstack(
+    `
+      fn handle(x: i32) void {
+        if (x == 1) {
+          doA();
+        } else if (x == 2) {
+          doB();
+    +     doExtra();
+        } else {
+          doC();
+        }
+      }
+      fn doA() void {}
+      fn doB() void {}
+    + fn doExtra() void {}
+      fn doC() void {}
+    `,
+    "handle",
+    { file: "elseif.zig" },
+  ).toEqual(`
+      handle(x)
+      ├─ if x == 1
+         └─ doA()
+      ├─ else if x == 2
+         ├─ doB()
+    +    └─ doExtra()
+      └─ else
+         └─ doC()
+  `);
+});
+
+test("zig: try and defer as branches; skips nested struct fns", ({
+  expectCallstack,
+}) => {
+  expectCallstack(
+    `
+      fn boot(x: i32) !void {
+        try open_();
+        defer close();
+        const Nested = struct {
+          fn hidden() void {}
+        };
+        visible();
+    +   flush();
+      }
+      fn open_() !void {}
+      fn close() void {}
+      fn visible() void {}
+    + fn flush() void {}
+    `,
+    "boot",
+    { file: "try.zig" },
+  ).toEqual(`
+      boot(x)
+      ├─ try
+         └─ open_()
+      ├─ defer
+         └─ close()
+      ├─ visible()
+    + └─ flush()
+  `);
+});
+
+test("zig: switch cases as branches", ({ expectCallstack }) => {
+  expectCallstack(
+    `
+      fn handle(x: i32) void {
+        switch (x) {
+          1 => doA(),
+          else => doC(),
+        }
+    +   flush();
+      }
+      fn doA() void {}
+      fn doC() void {}
+    + fn flush() void {}
+    `,
+    "handle",
+    { file: "switch.zig" },
+  ).toEqual(`
+      handle(x)
+      ├─ case 1
+         └─ doA()
+      ├─ else
+         └─ doC()
+    + └─ flush()
+  `);
+});
+
+test("zig: free function helper expansion", ({ expectCallstack }) => {
+  expectCallstack(
+    `
+      fn make() void {
+        init();
+    +   ready();
+      }
+      fn init() void {}
+    + fn ready() void {}
+    `,
+    "make",
+    { file: "init.zig" },
+  ).toEqual(`
+      make()
+      ├─ init()
+    + └─ ready()
+  `);
+});
+
+test("zig: else-if + try combined control flow", ({ expectCallstack }) => {
+  expectCallstack(
+    `
+      fn boot(x: i32) !void {
+        if (x == 1) {
+          doA();
+        } else if (x == 2) {
+          doB();
+        } else {
+          doC();
+        }
+        try open_();
+    +   visible();
+      }
+      fn doA() void {}
+      fn doB() void {}
+      fn doC() void {}
+      fn open_() !void {}
+    + fn visible() void {}
+    `,
+    "boot",
+    { file: "combo.zig" },
+  ).toEqual(`
+      boot(x)
+      ├─ if x == 1
+         └─ doA()
+      ├─ else if x == 2
+         └─ doB()
+      ├─ else
+         └─ doC()
+      ├─ try
+         └─ open_()
+    + └─ visible()
+  `);
+});

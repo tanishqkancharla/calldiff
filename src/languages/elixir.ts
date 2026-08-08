@@ -139,6 +139,8 @@ function collectStatements(
 
   const walk = (node: SyntaxNode): void => {
     // Nested defs / anonymous fn — do not attribute to outer
+    if (node.type === "anonymous_function") return;
+
     if (node.type === "call") {
       const head = childByType(node, "identifier");
       if (head && (isDefKw(head.text) || head.text === "fn" || head.text === "defmodule")) {
@@ -172,8 +174,79 @@ function collectStatements(
         return;
       }
       if (head && head.text === "case") {
-        // Minimal: treat each do_block clause roughly via stab; skip deep case for now
-        // Still walk children for calls inside
+        const doBlock = childByType(node, "do_block");
+        for (const clause of doBlock ? namedChildren(doBlock) : []) {
+          if (clause.type !== "stab_clause") continue;
+          const pattern = childByType(clause, "arguments");
+          const text = pattern ? collapseWs(pattern.text) : "";
+          const body = childByType(clause, "body");
+          steps.push({
+            type: "branch",
+            key: text ? `case:${text}` : "case",
+            label: text ? `case ${text}` : "case",
+            children: body ? collectBody(body, moduleName) : [],
+          });
+        }
+        return;
+      }
+      if (head && head.text === "cond") {
+        const doBlock = childByType(node, "do_block");
+        for (const clause of doBlock ? namedChildren(doBlock) : []) {
+          if (clause.type !== "stab_clause") continue;
+          const pattern = childByType(clause, "arguments");
+          const text = pattern ? collapseWs(pattern.text) : "";
+          const body = childByType(clause, "body");
+          steps.push({
+            type: "branch",
+            key: text ? `cond:${text}` : "cond",
+            label: text ? `cond ${text}` : "cond",
+            children: body ? collectBody(body, moduleName) : [],
+          });
+        }
+        return;
+      }
+      if (head && head.text === "try") {
+        const doBlock = childByType(node, "do_block");
+        const tryKids = doBlock
+          ? namedChildren(doBlock).filter(
+              (c) =>
+                c.type !== "rescue_block" &&
+                c.type !== "catch_block" &&
+                c.type !== "after_block" &&
+                c.type !== "else_block",
+            )
+          : [];
+        steps.push({
+          type: "branch",
+          key: "try",
+          label: "try",
+          children: collectStatements(tryKids, moduleName),
+        });
+        const rescue = doBlock ? childByType(doBlock, "rescue_block") : null;
+        if (rescue) {
+          for (const clause of namedChildren(rescue)) {
+            if (clause.type !== "stab_clause") continue;
+            const pattern = childByType(clause, "arguments");
+            const text = pattern ? collapseWs(pattern.text) : "";
+            const body = childByType(clause, "body");
+            steps.push({
+              type: "branch",
+              key: text ? `rescue:${text}` : "rescue",
+              label: text ? `rescue ${text}` : "rescue",
+              children: body ? collectBody(body, moduleName) : [],
+            });
+          }
+        }
+        const after = doBlock ? childByType(doBlock, "after_block") : null;
+        if (after) {
+          steps.push({
+            type: "branch",
+            key: "after",
+            label: "after",
+            children: collectBody(after, moduleName),
+          });
+        }
+        return;
       }
 
       // Regular call — callee is first named child (identifier or dot)

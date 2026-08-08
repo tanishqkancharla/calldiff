@@ -146,11 +146,40 @@ function collectStatements(statements: SyntaxNode[]): CallStep[] {
       return;
     }
 
+    if (node.type === "case_statement") {
+      for (const item of namedChildren(node)) {
+        if (item.type !== "case_item") continue;
+        const kids = namedChildren(item);
+        const pattern =
+          kids.find(
+            (c) =>
+              c.type === "word" ||
+              c.type === "string" ||
+              c.type === "raw_string" ||
+              c.type === "extglob_pattern" ||
+              c.type === "concatenation" ||
+              c.type === "ansi_c_string",
+          ) ?? kids[0] ?? null;
+        const text = pattern ? collapseWs(pattern.text) : "";
+        const body = kids.filter((c) => c !== pattern);
+        steps.push({
+          type: "branch",
+          key: text ? `case:${text}` : "case",
+          label: text ? `case ${text}` : "case",
+          children: collectStatements(body),
+        });
+      }
+      return;
+    }
+
     if (node.type === "command") {
       const name = commandName(node);
       if (name) addCall(name, node.startIndex);
-      // Still walk args for command substitutions
-      for (const child of namedChildren(node).slice(1)) walk(child);
+      // Walk args / substitutions (including when the name itself is $(...))
+      for (const child of namedChildren(node)) {
+        if (name && child.type === "command_name") continue;
+        walk(child);
+      }
       return;
     }
 

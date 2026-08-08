@@ -52,7 +52,13 @@ function calleeFromExp(node: SyntaxNode): string | null {
     const kids = namedChildren(node);
     const mod = kids.find((c) => c.type === "module" || c.type === "module_id");
     const vari = kids.find((c) => c.type === "variable");
-    if (vari && mod) return `${mod.text}.${vari.text}`;
+    if (vari && mod) {
+      const modName =
+        mod.type === "module"
+          ? (childByType(mod, "module_id")?.text ?? mod.text.replace(/\.$/, ""))
+          : mod.text.replace(/\.$/, "");
+      return `${modName}.${vari.text}`;
+    }
     if (vari) return vari.text;
   }
   // constructors / operators / literals — ignore as callees when not useful
@@ -114,6 +120,24 @@ function collectExpr(node: SyntaxNode): CallStep[] {
       return;
     }
 
+    if (n.type === "case") {
+      const alts = childByType(n, "alternatives");
+      for (const alt of alts ? namedChildren(alts) : []) {
+        if (alt.type !== "alternative") continue;
+        const pattern =
+          namedChildren(alt).find((c) => c.type !== "match") ?? null;
+        const text = pattern ? collapseWs(pattern.text) : "";
+        const match = childByType(alt, "match");
+        steps.push({
+          type: "branch",
+          key: text ? `case:${text}` : "case",
+          label: text ? `case ${text}` : "case",
+          children: collectFromMatch(match),
+        });
+      }
+      return;
+    }
+
     if (n.type === "apply") {
       const key = calleeFromExp(n);
       // Skip type-like constructors: Just x, Runner
@@ -139,6 +163,14 @@ function collectExpr(node: SyntaxNode): CallStep[] {
       // Bare variable used as expression in do-block is a call-ish nullary
       if (n.text !== "return" && n.text !== "pure" && !isLikelyTypeName(n.text)) {
         addCall(n.text, n.startIndex);
+      }
+      return;
+    }
+
+    if (n.type === "qualified") {
+      const key = calleeFromExp(n);
+      if (key && !isLikelyTypeName(key.split(".").pop() ?? key)) {
+        addCall(key, n.startIndex);
       }
       return;
     }

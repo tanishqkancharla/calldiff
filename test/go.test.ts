@@ -166,3 +166,149 @@ test("go: NewThing() expands through new Thing alias", ({
     + └─ Also()
   `);
 });
+
+test("go: defer as branch; skips deferred func literals", ({
+  expectCallstack,
+}) => {
+  expectCallstack(
+    `
+      package main
+
+      func Boot() {
+        defer cleanup()
+        defer func() { hidden() }()
+        visible()
+    +   also()
+      }
+
+      func cleanup() {}
+      func hidden() {}
+      func visible() {}
+    + func also() {}
+    `,
+    "Boot",
+    { file: "defer.go" },
+  ).toEqual(`
+      Boot()
+      ├─ defer
+         └─ cleanup()
+      ├─ defer
+      ├─ visible()
+    + └─ also()
+  `);
+});
+
+test("go: value receiver methods resolve to Type.Method", ({
+  expectCallstack,
+}) => {
+  expectCallstack(
+    `
+      package runner
+
+      type Worker struct{}
+
+      func (w Worker) Start() {
+        w.Prepare()
+    +   w.Validate()
+        w.Run()
+      }
+
+      func (w Worker) Prepare() {}
+    + func (w Worker) Validate() {}
+      func (w Worker) Run() {}
+    `,
+    "Worker.Start",
+    { file: "value.go" },
+  ).toEqual(`
+      Worker.Start()
+      ├─ Worker.Prepare()
+    + ├─ Worker.Validate()
+      └─ Worker.Run()
+  `);
+});
+
+test("go: type switch as branches", ({ expectCallstack }) => {
+  expectCallstack(
+    `
+      package ctrl
+
+      func Handle(x any) {
+        switch x.(type) {
+        case int:
+          DoInt()
+        default:
+          DoOther()
+        }
+    +   Flush()
+      }
+
+      func DoInt() {}
+      func DoOther() {}
+    + func Flush() {}
+    `,
+    "Handle",
+    { file: "typeswitch.go" },
+  ).toEqual(`
+      Handle(x)
+      ├─ case int
+         └─ DoInt()
+      ├─ default
+         └─ DoOther()
+    + └─ Flush()
+  `);
+});
+
+test("go: skips nested function bodies (standalone)", ({
+  expectCallstack,
+}) => {
+  expectCallstack(
+    `
+      package nest
+
+      func Outer() {
+        visible()
+        f := func() {
+          hidden()
+        }
+        _ = f
+    +   also()
+      }
+
+      func visible() {}
+      func hidden() {}
+    + func also() {}
+    `,
+    "Outer",
+    { file: "nested.go" },
+  ).toEqual(`
+      Outer()
+      ├─ visible()
+    + └─ also()
+  `);
+});
+
+test("go: NewThing entrypoint itself expands constructor body", ({
+  expectCallstack,
+}) => {
+  expectCallstack(
+    `
+      package ctor
+
+      func NewThing() *Thing {
+        init()
+    +   ready()
+        return &Thing{}
+      }
+
+      func init() {}
+    + func ready() {}
+      type Thing struct{}
+    `,
+    "new Thing",
+    { file: "newentry.go" },
+  ).toEqual(`
+      Thing()
+      ├─ init()
+    + └─ ready()
+  `);
+});

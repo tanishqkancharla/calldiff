@@ -149,6 +149,54 @@ function collectStatements(
       return;
     }
 
+    if (node.type === "try_expression") {
+      steps.push({
+        type: "branch",
+        key: "try",
+        label: "try",
+        children: collectStatements(namedChildren(node), typeName),
+      });
+      return;
+    }
+
+    if (node.type === "defer_statement") {
+      steps.push({
+        type: "branch",
+        key: "defer",
+        label: "defer",
+        children: collectStatements(namedChildren(node), typeName),
+      });
+      return;
+    }
+
+    if (node.type === "switch_expression") {
+      for (const clause of namedChildren(node)) {
+        if (clause.type !== "switch_case") continue;
+        const kids = namedChildren(clause);
+        const bodyNode =
+          kids.find(
+            (c) =>
+              c.type === "block" ||
+              c.type === "block_expression" ||
+              c.type === "call_expression" ||
+              c.type === "identifier",
+          ) ?? kids[kids.length - 1] ?? null;
+        const pattern =
+          kids.find((c) => c !== bodyNode) ?? null;
+        const isElse = !pattern;
+        const text = pattern ? collapseWs(pattern.text) : "";
+        steps.push({
+          type: "branch",
+          key: isElse ? "else" : text ? `case:${text}` : "case",
+          label: isElse ? "else" : text ? `case ${text}` : "case",
+          children: bodyNode
+            ? collectStatements([bodyNode], typeName)
+            : [],
+        });
+      }
+      return;
+    }
+
     if (node.type === "call_expression") {
       const callee = node.namedChild(0);
       if (callee) {

@@ -78,3 +78,158 @@ test("elixir: module-local calls resolve to Module.fun", ({
       └─ Runner.run()
   `);
 });
+
+test("elixir: Module.fun remote calls", ({ expectCallstack }) => {
+  expectCallstack(
+    `
+      defmodule Boot do
+        def start do
+          AuthStorage.create()
+    +     SessionManager.open(1)
+          Tools.build()
+        end
+      end
+
+      defmodule AuthStorage do
+        def create, do: :ok
+      end
+
+      defmodule SessionManager do
+        def open(_id), do: :ok
+      end
+
+      defmodule Tools do
+        def build, do: :ok
+      end
+    `,
+    "Boot.start",
+    { file: "remote.ex" },
+  ).toEqual(`
+      Boot.start()
+      ├─ AuthStorage.create()
+    + ├─ SessionManager.open(_id)
+      └─ Tools.build()
+  `);
+});
+
+test("elixir: skips nested fn and inner def bodies", ({ expectCallstack }) => {
+  expectCallstack(
+    `
+      defmodule Outer do
+        def run do
+          visible()
+          fn -> hidden() end
+    +     also_visible()
+        end
+
+        def visible, do: :ok
+        def hidden, do: :ok
+    +   def also_visible, do: :ok
+      end
+    `,
+    "Outer.run",
+    { file: "nested.ex" },
+  ).toEqual(`
+      Outer.run()
+      ├─ Outer.visible()
+    + └─ Outer.also_visible()
+  `);
+});
+
+test("elixir: case and try/rescue/after as branches", ({
+  expectCallstack,
+}) => {
+  expectCallstack(
+    `
+      defmodule M do
+        def boot(x) do
+          case x do
+            1 -> do_a()
+            _ -> do_other()
+          end
+          try do
+            open_()
+          rescue
+            e in RuntimeError -> recover()
+          after
+            close()
+          end
+    +     flush()
+        end
+        def do_a, do: :ok
+        def do_other, do: :ok
+        def open_, do: :ok
+        def recover, do: :ok
+        def close, do: :ok
+    +   def flush, do: :ok
+      end
+    `,
+    "M.boot",
+    { file: "ctrl.ex" },
+  ).toEqual(`
+      M.boot(x)
+      ├─ case 1
+         └─ M.do_a()
+      ├─ case _
+         └─ M.do_other()
+      ├─ try
+         └─ M.open_()
+      ├─ rescue e in RuntimeError
+         └─ M.recover()
+      ├─ after
+         └─ M.close()
+    + └─ M.flush()
+  `);
+});
+
+test("elixir: cond clauses as branches", ({ expectCallstack }) => {
+  expectCallstack(
+    `
+      defmodule M do
+        def handle(x) do
+          cond do
+            x == 1 -> do_a()
+            true -> do_other()
+          end
+    +     flush()
+        end
+        def do_a, do: :ok
+        def do_other, do: :ok
+    +   def flush, do: :ok
+      end
+    `,
+    "M.handle",
+    { file: "cond.ex" },
+  ).toEqual(`
+      M.handle(x)
+      ├─ cond x == 1
+         └─ M.do_a()
+      ├─ cond true
+         └─ M.do_other()
+    + └─ M.flush()
+  `);
+});
+
+test("elixir: defp helpers still resolve as Module.fun", ({
+  expectCallstack,
+}) => {
+  expectCallstack(
+    `
+      defmodule Svc do
+        def start do
+          prepare()
+    +     finish()
+        end
+
+        defp prepare, do: :ok
+    +   defp finish, do: :ok
+      end
+    `,
+    "Svc.start",
+    { file: "priv.ex" },
+  ).toEqual(`
+      Svc.start()
+      ├─ Svc.prepare()
+    + └─ Svc.finish()
+  `);
+});

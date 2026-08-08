@@ -107,6 +107,9 @@ function collectExpr(
       if (vd) {
         for (const b of namedChildren(vd)) {
           if (b.type !== "let_binding") continue;
+          const hasParams = namedChildren(b).some((c) => c.type === "parameter");
+          // Nested function bodies are not attributed to the outer caller
+          if (hasParams) continue;
           // rhs is last non-parameter child
           const kids = namedChildren(b);
           const rhs =
@@ -123,6 +126,34 @@ function collectExpr(
       const body =
         namedChildren(n).find((c) => c.type !== "value_definition") ?? null;
       if (body) walk(body);
+      return;
+    }
+
+    if (n.type === "match_expression" || n.type === "try_expression") {
+      if (n.type === "try_expression") {
+        const tryBody =
+          namedChildren(n).find((c) => c.type !== "match_case") ?? null;
+        steps.push({
+          type: "branch",
+          key: "try",
+          label: "try",
+          children: tryBody ? collectExpr(tryBody, moduleName) : [],
+        });
+      }
+      for (const clause of namedChildren(n)) {
+        if (clause.type !== "match_case") continue;
+        const kids = namedChildren(clause);
+        const body = kids[kids.length - 1] ?? null;
+        const pattern = kids.length > 1 ? kids[0] : null;
+        const text = pattern ? collapseWs(pattern.text) : "";
+        const labelKind = n.type === "try_expression" ? "with" : "case";
+        steps.push({
+          type: "branch",
+          key: text ? `${labelKind}:${text}` : labelKind,
+          label: text ? `${labelKind} ${text}` : labelKind,
+          children: body ? collectExpr(body, moduleName) : [],
+        });
+      }
       return;
     }
 
