@@ -1,7 +1,51 @@
+import Parser from "tree-sitter";
 import { buildCallTree } from "../src/calltree.js";
 import { diffTrees } from "../src/diff.js";
 import { buildIndex, extractFunctions } from "../src/extract.js";
+import { loadGrammarPackage, resolveLanguage } from "../src/languages/grammars.js";
+import { javascriptExtractor } from "../src/languages/javascript.js";
+import { javaExtractor } from "../src/languages/java.js";
+import { rubyExtractor } from "../src/languages/ruby.js";
+import { rustExtractor } from "../src/languages/rust.js";
+import { detectLanguage } from "../src/languages/registry.js";
+import type { LanguageExtractor } from "../src/languages/types.js";
+import type { FunctionInfo } from "../src/types.js";
 import { renderDiff } from "../src/render.js";
+
+/**
+ * Extra extractors not yet merged into registry.ts (parent merges).
+ * Lets language fixture tests run before registry wiring.
+ */
+const pendingExtractors: LanguageExtractor[] = [
+  javascriptExtractor,
+  rustExtractor,
+  javaExtractor,
+  rubyExtractor,
+];
+
+const pendingByExt = new Map<string, LanguageExtractor>();
+for (const ext of pendingExtractors) {
+  for (const e of ext.extensions) pendingByExt.set(e.toLowerCase(), ext);
+}
+
+const pendingParser = new Parser();
+
+function extractWithPending(file: string, source: string): FunctionInfo[] {
+  const registered = extractFunctions(file, source);
+  if (registered.length > 0 || detectLanguage(file)) return registered;
+
+  const match = file.match(/(\.[^.]+)$/);
+  const ext = (match?.[1] ?? "").toLowerCase();
+  const extractor = pendingByExt.get(ext);
+  if (!extractor) return [];
+
+  const language = resolveLanguage(
+    loadGrammarPackage(extractor.grammarPackage),
+    extractor.grammarExport,
+  );
+  pendingParser.setLanguage(language as any);
+  return extractor.extract(file, source, pendingParser.parse(source));
+}
 
 export type CallstackDiffOptions = {
   maxDepth?: number;
@@ -86,8 +130,8 @@ export function callstackDiff(
   const { before: beforeSource, after: afterSource } =
     sourcesFromFileDiff(fileDiff);
 
-  const before = buildIndex(extractFunctions(beforeName, beforeSource));
-  const after = buildIndex(extractFunctions(afterName, afterSource));
+  const before = buildIndex(extractWithPending(beforeName, beforeSource));
+  const after = buildIndex(extractWithPending(afterName, afterSource));
 
   const beforeTree = buildCallTree(entry, before, maxDepth);
   const afterTree = buildCallTree(entry, after, maxDepth);
