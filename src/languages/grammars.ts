@@ -92,6 +92,9 @@ function requireGrammar(
 /** Packages that need a pinned install spec (latest breaks createRequire). */
 const INSTALL_SPEC: Record<string, string> = {
   "tree-sitter-c-sharp": "tree-sitter-c-sharp@0.23.1",
+  // 0.4+ is ESM-with-TLA; 0.2.0 is CJS and loads via createRequire.
+  "@tree-sitter-grammars/tree-sitter-lua":
+    "@tree-sitter-grammars/tree-sitter-lua@0.2.0",
 };
 
 /**

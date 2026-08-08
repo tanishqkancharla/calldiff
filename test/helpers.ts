@@ -11,11 +11,15 @@ import { elixirExtractor } from "../src/languages/elixir.js";
 import { haskellExtractor } from "../src/languages/haskell.js";
 import { javascriptExtractor } from "../src/languages/javascript.js";
 import { javaExtractor } from "../src/languages/java.js";
+import { kotlinExtractor } from "../src/languages/kotlin.js";
+import { luaExtractor } from "../src/languages/lua.js";
 import { ocamlExtractor } from "../src/languages/ocaml.js";
 import { phpExtractor } from "../src/languages/php.js";
 import { rubyExtractor } from "../src/languages/ruby.js";
 import { rustExtractor } from "../src/languages/rust.js";
+import { scalaExtractor } from "../src/languages/scala.js";
 import { solidityExtractor } from "../src/languages/solidity.js";
+import { swiftExtractor } from "../src/languages/swift.js";
 import { zigExtractor } from "../src/languages/zig.js";
 import { detectLanguage } from "../src/languages/registry.js";
 import type { LanguageExtractor } from "../src/languages/types.js";
@@ -41,6 +45,10 @@ const pendingExtractors: LanguageExtractor[] = [
   zigExtractor,
   solidityExtractor,
   ocamlExtractor,
+  kotlinExtractor,
+  swiftExtractor,
+  scalaExtractor,
+  luaExtractor,
 ];
 
 const pendingByExt = new Map<string, LanguageExtractor>();
