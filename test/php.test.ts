@@ -99,7 +99,7 @@ test("php: new Class expands through __construct", ({ expectCallstack }) => {
     { file: "ctor.php" },
   ).toEqual(`
       make()
-      └─ new Thing()
+      └─ Thing()
          ├─ init()
     +    └─ ready()
   `);

@@ -217,7 +217,7 @@ test("csharp: try/catch/finally and switch as branches", ({
       Booter.Boot(x)
       ├─ try
          └─ Open()
-      ├─ catch System.Exception e
+      ├─ catch (System.Exception e)
          └─ Recover()
       ├─ finally
          └─ Close()
