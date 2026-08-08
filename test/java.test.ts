@@ -48,7 +48,7 @@ test("java: refactors calls into a helper with if/else", ({
       ├─ if (options.sessionId == null)
          └─ SessionManager.create()
       └─ else
-         └─ SessionManager.open()
+         └─ SessionManager.open(id)
   `);
 });
 

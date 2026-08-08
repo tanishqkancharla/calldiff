@@ -41,7 +41,7 @@ test("rust: refactors calls into a helper with if/else", ({
       ├─ if options.session_id.is_empty()
          └─ session_manager_create()
       └─ else
-         └─ session_manager_open()
+         └─ session_manager_open(_id)
   `);
 });
 
