@@ -69,9 +69,11 @@ If you omit `--entry`, calldiff infers exported functions whose expanded call tr
 3. Builds per-function callee lists and expands them into call trees
 4. Diffs the trees and prints an ASCII callstack diff
 
-Supported today: TypeScript/TSX, Python, Go. This is syntactic (AST-based), not a full typechecker — dynamic calls won’t resolve.
+### Supported languages
 
-Override the grammar cache with `CALLDIFF_GRAMMAR_CACHE`.
+TypeScript/TSX, JavaScript, Python, Go, Rust, Java, Ruby, C, C++, C#, PHP, Kotlin, Swift, Scala, Lua, Elixir, Bash, Haskell, Zig, Solidity, OCaml.
+
+Grammars install on first use (override cache with `CALLDIFF_GRAMMAR_CACHE`). This is syntactic (AST-based), not a full typechecker — dynamic calls won’t resolve.
 
 ## Dev
 

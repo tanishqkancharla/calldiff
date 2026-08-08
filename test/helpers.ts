@@ -1,79 +1,7 @@
-import Parser from "tree-sitter";
 import { buildCallTree } from "../src/calltree.js";
 import { diffTrees } from "../src/diff.js";
 import { buildIndex, extractFunctions } from "../src/extract.js";
-import { loadGrammarPackage, resolveLanguage } from "../src/languages/grammars.js";
-import { bashExtractor } from "../src/languages/bash.js";
-import { cExtractor } from "../src/languages/c.js";
-import { cppExtractor } from "../src/languages/cpp.js";
-import { csharpExtractor } from "../src/languages/csharp.js";
-import { elixirExtractor } from "../src/languages/elixir.js";
-import { haskellExtractor } from "../src/languages/haskell.js";
-import { javascriptExtractor } from "../src/languages/javascript.js";
-import { javaExtractor } from "../src/languages/java.js";
-import { kotlinExtractor } from "../src/languages/kotlin.js";
-import { luaExtractor } from "../src/languages/lua.js";
-import { ocamlExtractor } from "../src/languages/ocaml.js";
-import { phpExtractor } from "../src/languages/php.js";
-import { rubyExtractor } from "../src/languages/ruby.js";
-import { rustExtractor } from "../src/languages/rust.js";
-import { scalaExtractor } from "../src/languages/scala.js";
-import { solidityExtractor } from "../src/languages/solidity.js";
-import { swiftExtractor } from "../src/languages/swift.js";
-import { zigExtractor } from "../src/languages/zig.js";
-import { detectLanguage } from "../src/languages/registry.js";
-import type { LanguageExtractor } from "../src/languages/types.js";
-import type { FunctionInfo } from "../src/types.js";
 import { renderDiff } from "../src/render.js";
-
-/**
- * Extra extractors not yet merged into registry.ts (parent merges).
- * Lets language fixture tests run before registry wiring.
- */
-const pendingExtractors: LanguageExtractor[] = [
-  javascriptExtractor,
-  rustExtractor,
-  javaExtractor,
-  rubyExtractor,
-  cExtractor,
-  cppExtractor,
-  csharpExtractor,
-  phpExtractor,
-  elixirExtractor,
-  bashExtractor,
-  haskellExtractor,
-  zigExtractor,
-  solidityExtractor,
-  ocamlExtractor,
-  kotlinExtractor,
-  swiftExtractor,
-  scalaExtractor,
-  luaExtractor,
-];
-
-const pendingByExt = new Map<string, LanguageExtractor>();
-for (const ext of pendingExtractors) {
-  for (const e of ext.extensions) pendingByExt.set(e.toLowerCase(), ext);
-}
-
-const pendingParser = new Parser();
-
-function extractWithPending(file: string, source: string): FunctionInfo[] {
-  const registered = extractFunctions(file, source);
-  if (registered.length > 0 || detectLanguage(file)) return registered;
-
-  const match = file.match(/(\.[^.]+)$/);
-  const ext = (match?.[1] ?? "").toLowerCase();
-  const extractor = pendingByExt.get(ext);
-  if (!extractor) return [];
-
-  const language = resolveLanguage(
-    loadGrammarPackage(extractor.grammarPackage),
-    extractor.grammarExport,
-  );
-  pendingParser.setLanguage(language as any);
-  return extractor.extract(file, source, pendingParser.parse(source));
-}
 
 export type CallstackDiffOptions = {
   maxDepth?: number;
@@ -143,7 +71,7 @@ function snapshotNames(file: string): { before: string; after: string } {
 }
 
 /**
- * Diff callstacks for an entrypoint given a TypeScript file diff.
+ * Diff callstacks for an entrypoint given a source file diff.
  * Returns colorless ASCII output suitable for assertions.
  */
 export function callstackDiff(
@@ -158,8 +86,8 @@ export function callstackDiff(
   const { before: beforeSource, after: afterSource } =
     sourcesFromFileDiff(fileDiff);
 
-  const before = buildIndex(extractWithPending(beforeName, beforeSource));
-  const after = buildIndex(extractWithPending(afterName, afterSource));
+  const before = buildIndex(extractFunctions(beforeName, beforeSource));
+  const after = buildIndex(extractFunctions(afterName, afterSource));
 
   const beforeTree = buildCallTree(entry, before, maxDepth);
   const afterTree = buildCallTree(entry, after, maxDepth);
