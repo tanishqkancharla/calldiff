@@ -64,12 +64,14 @@ If you omit `--entry`, calldiff infers exported functions whose expanded call tr
 
 ## How it works
 
-1. Reads TypeScript from both git trees (`git show` / working tree)
-2. Parses with [tree-sitter](https://tree-sitter.github.io/tree-sitter/) (`tree-sitter-typescript`)
+1. Reads source from both git trees (`git show` / working tree)
+2. Detects language by file extension, loads a [tree-sitter](https://tree-sitter.github.io/tree-sitter/) grammar (bundled or on-demand into `~/.cache/calldiff/grammars`), and parses
 3. Builds per-function callee lists and expands them into call trees
 4. Diffs the trees and prints an ASCII callstack diff
 
-This is syntactic (AST-based), not a full typechecker — dynamic calls won’t resolve.
+Supported today: TypeScript/TSX, Python, Go. This is syntactic (AST-based), not a full typechecker — dynamic calls won’t resolve.
+
+Override the grammar cache with `CALLDIFF_GRAMMAR_CACHE`.
 
 ## Dev
 

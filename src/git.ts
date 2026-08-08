@@ -44,7 +44,9 @@ export function verifyCommit(cwd: string, ref: string): void {
   }
 }
 
-const TS_EXT = /\.(ts|tsx|mts|cts)$/;
+import { listSupportedExtensions } from "./languages/registry.js";
+
+const SOURCE_EXT = new Set(listSupportedExtensions());
 const SKIP_DIRS = new Set([
   "node_modules",
   "dist",
@@ -56,10 +58,12 @@ const SKIP_DIRS = new Set([
   "out",
 ]);
 
-function isTsFile(path: string): boolean {
-  if (!TS_EXT.test(path)) return false;
-  if (path.endsWith(".d.ts")) return false;
-  return true;
+function isSourceFile(path: string): boolean {
+  const lower = path.toLowerCase();
+  if (lower.endsWith(".d.ts")) return false;
+  const dot = lower.lastIndexOf(".");
+  if (dot < 0) return false;
+  return SOURCE_EXT.has(lower.slice(dot));
 }
 
 function walkWorktree(root: string, dir: string, out: string[]): void {
@@ -78,18 +82,18 @@ function walkWorktree(root: string, dir: string, out: string[]): void {
       walkWorktree(root, full, out);
       continue;
     }
-    if (entry.isFile() && isTsFile(entry.name)) {
+    if (entry.isFile() && isSourceFile(entry.name)) {
       out.push(relative(root, full).split(sep).join("/"));
     }
   }
 }
 
-function listCommitTsFiles(cwd: string, ref: string): string[] {
+function listCommitSourceFiles(cwd: string, ref: string): string[] {
   const output = git(cwd, ["ls-tree", "-r", "--name-only", ref]);
   return output
     .split("\n")
     .map((line) => line.trim())
-    .filter((line) => line && isTsFile(line));
+    .filter((line) => line && isSourceFile(line));
 }
 
 function pathAllowed(file: string, pathFilters: string[]): boolean {
@@ -104,7 +108,16 @@ function pathAllowed(file: string, pathFilters: string[]): boolean {
   });
 }
 
+/** @deprecated Use listSourceFiles */
 export function listTsFiles(
+  cwd: string,
+  snapshot: Snapshot,
+  pathFilters: string[] = [],
+): string[] {
+  return listSourceFiles(cwd, snapshot, pathFilters);
+}
+
+export function listSourceFiles(
   cwd: string,
   snapshot: Snapshot,
   pathFilters: string[] = [],
@@ -116,7 +129,7 @@ export function listTsFiles(
           walkWorktree(cwd, cwd, out);
           return out;
         })()
-      : listCommitTsFiles(cwd, snapshot.ref);
+      : listCommitSourceFiles(cwd, snapshot.ref);
 
   return files.filter((file) => pathAllowed(file, pathFilters)).sort();
 }
