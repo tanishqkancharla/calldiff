@@ -3,14 +3,20 @@ import { buildCallTree } from "../src/calltree.js";
 import { diffTrees } from "../src/diff.js";
 import { buildIndex, extractFunctions } from "../src/extract.js";
 import { loadGrammarPackage, resolveLanguage } from "../src/languages/grammars.js";
+import { bashExtractor } from "../src/languages/bash.js";
 import { cExtractor } from "../src/languages/c.js";
 import { cppExtractor } from "../src/languages/cpp.js";
 import { csharpExtractor } from "../src/languages/csharp.js";
+import { elixirExtractor } from "../src/languages/elixir.js";
+import { haskellExtractor } from "../src/languages/haskell.js";
 import { javascriptExtractor } from "../src/languages/javascript.js";
 import { javaExtractor } from "../src/languages/java.js";
+import { ocamlExtractor } from "../src/languages/ocaml.js";
 import { phpExtractor } from "../src/languages/php.js";
 import { rubyExtractor } from "../src/languages/ruby.js";
 import { rustExtractor } from "../src/languages/rust.js";
+import { solidityExtractor } from "../src/languages/solidity.js";
+import { zigExtractor } from "../src/languages/zig.js";
 import { detectLanguage } from "../src/languages/registry.js";
 import type { LanguageExtractor } from "../src/languages/types.js";
 import type { FunctionInfo } from "../src/types.js";
@@ -29,6 +35,12 @@ const pendingExtractors: LanguageExtractor[] = [
   cppExtractor,
   csharpExtractor,
   phpExtractor,
+  elixirExtractor,
+  bashExtractor,
+  haskellExtractor,
+  zigExtractor,
+  solidityExtractor,
+  ocamlExtractor,
 ];
 
 const pendingByExt = new Map<string, LanguageExtractor>();

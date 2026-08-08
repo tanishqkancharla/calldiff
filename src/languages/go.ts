@@ -1,5 +1,5 @@
 /**
- * Minimal Go callable extraction (tree-sitter-go).
+ * Go callable extraction (tree-sitter-go).
  */
 import type { CallStep, FunctionInfo } from "../types.js";
 import {
@@ -21,21 +21,28 @@ function getParamsLabel(params: SyntaxNode | null): string {
   const names: string[] = [];
   for (const p of namedChildren(params)) {
     if (p.type !== "parameter_declaration") continue;
-    const id = childByType(p, "identifier");
-    names.push(id?.text ?? "_");
+    const ids = namedChildren(p).filter((c) => c.type === "identifier");
+    if (ids.length === 0) names.push("_");
+    else for (const id of ids) names.push(id.text);
   }
   return names.length === 0 ? "()" : `(${names.join(", ")})`;
 }
 
 function calleeKey(node: SyntaxNode, receiverType: string | null): string | null {
-  if (node.type === "identifier") return node.text;
+  if (node.type === "identifier") {
+    // NewThing() → new Thing (constructor alias)
+    if (node.text.startsWith("New") && node.text.length > 3) {
+      const typeName = node.text.slice(3);
+      if (isExported(typeName)) return `new ${typeName}`;
+    }
+    return node.text;
+  }
   if (node.type === "selector_expression") {
     const object = node.namedChild(0);
     const field = childByType(node, "field_identifier");
     if (!object || !field) return null;
     const prop = field.text;
     if (object.type === "identifier") {
-      // Heuristic: lowercase receiver var → Type.Method when in a method
       const objName = object.text;
       if (
         receiverType &&
@@ -61,6 +68,47 @@ function statementsOf(node: SyntaxNode): SyntaxNode[] {
   return [node];
 }
 
+function collectIf(
+  node: SyntaxNode,
+  receiverType: string | null,
+  steps: CallStep[],
+  asElseIf = false,
+): void {
+  const kids = namedChildren(node);
+  const consequent = kids.find((c) => c.type === "block") ?? null;
+  const alt =
+    kids.find((c) => c !== consequent && (c.type === "block" || c.type === "if_statement")) ??
+    null;
+  const before = consequent
+    ? kids.slice(0, kids.indexOf(consequent))
+    : kids;
+  const condNode = before[before.length - 1] ?? null;
+  const condText = condNode ? collapseWs(condNode.text) : "";
+  const kind = asElseIf ? "else-if" : "if";
+  const labelKind = asElseIf ? "else if" : "if";
+
+  steps.push({
+    type: "branch",
+    key: condText ? `${kind}:${condText}` : kind,
+    label: condText ? `${labelKind} ${condText}` : labelKind,
+    children: consequent
+      ? collectStatements(statementsOf(consequent), receiverType)
+      : [],
+  });
+
+  if (!alt) return;
+  if (alt.type === "if_statement") {
+    collectIf(alt, receiverType, steps, true);
+  } else {
+    steps.push({
+      type: "branch",
+      key: "else",
+      label: "else",
+      children: collectStatements(statementsOf(alt), receiverType),
+    });
+  }
+}
+
 function collectStatements(
   statements: SyntaxNode[],
   receiverType: string | null,
@@ -78,42 +126,80 @@ function collectStatements(
   const walk = (node: SyntaxNode): void => {
     if (
       node.type === "function_declaration" ||
-      node.type === "method_declaration"
+      node.type === "method_declaration" ||
+      node.type === "func_literal"
     ) {
       return;
     }
 
     if (node.type === "if_statement") {
+      collectIf(node, receiverType, steps, false);
+      return;
+    }
+
+    if (
+      node.type === "expression_switch_statement" ||
+      node.type === "type_switch_statement"
+    ) {
       const kids = namedChildren(node);
-      const cond =
-        kids.find((c) => c.type !== "block") ?? null;
-      const blocks = kids.filter((c) => c.type === "block");
-      const condText = cond ? collapseWs(cond.text) : "";
-      steps.push({
-        type: "branch",
-        key: condText ? `if:${condText}` : "if",
-        label: condText ? `if ${condText}` : "if",
-        children: blocks[0]
-          ? collectStatements(statementsOf(blocks[0]), receiverType)
-          : [],
-      });
-      if (blocks[1]) {
-        steps.push({
-          type: "branch",
-          key: "else",
-          label: "else",
-          children: collectStatements(statementsOf(blocks[1]), receiverType),
-        });
+      const subject =
+        kids.find(
+          (c) =>
+            c.type !== "expression_case" &&
+            c.type !== "type_case" &&
+            c.type !== "default_case",
+        ) ?? null;
+      const subjectText = subject ? collapseWs(subject.text) : "";
+      for (const clause of kids) {
+        if (clause.type === "expression_case" || clause.type === "type_case") {
+          const expr =
+            childByType(clause, "expression_list") ??
+            childByType(clause, "type_list") ??
+            namedChildren(clause).find((c) => c.type !== "statement_list") ??
+            null;
+          const text = expr ? collapseWs(expr.text) : "";
+          const list = childByType(clause, "statement_list");
+          steps.push({
+            type: "branch",
+            key: text ? `case:${text}` : "case",
+            label: text
+              ? `case ${text}`
+              : subjectText
+                ? `case ${subjectText}`
+                : "case",
+            children: list
+              ? collectStatements(namedChildren(list), receiverType)
+              : [],
+          });
+        }
+        if (clause.type === "default_case") {
+          const list = childByType(clause, "statement_list");
+          steps.push({
+            type: "branch",
+            key: "default",
+            label: "default",
+            children: list
+              ? collectStatements(namedChildren(list), receiverType)
+              : [],
+          });
+        }
       }
       return;
     }
 
     if (node.type === "call_expression") {
       const callee = node.namedChild(0);
-      if (callee) {
+      if (callee && callee.type !== "func_literal") {
         const key = calleeKey(callee, receiverType);
         if (key) addCall(key, node.startIndex);
       }
+      // Do not walk into func_literal callees/bodies
+      for (const child of namedChildren(node)) {
+        if (child.type === "func_literal") continue;
+        if (child === callee) continue;
+        walk(child);
+      }
+      return;
     }
 
     for (const child of namedChildren(node)) walk(child);
@@ -145,7 +231,7 @@ function handleFunction(
   const params =
     namedChildren(node).find((c) => c.type === "parameter_list") ?? null;
   const body = childByType(node, "block");
-  functions.push({
+  const info: FunctionInfo = {
     key: name,
     label: `${name}${getParamsLabel(params)}`,
     file,
@@ -153,7 +239,20 @@ function handleFunction(
     exported: isExported(name),
     start: node.startIndex,
     end: node.endIndex,
-  });
+  };
+  functions.push(info);
+
+  // NewThing → constructor alias `new Thing`
+  if (name.startsWith("New") && name.length > 3) {
+    const typeName = name.slice(3);
+    if (isExported(typeName)) {
+      functions.push({
+        ...info,
+        key: `new ${typeName}`,
+        label: `${typeName}()`,
+      });
+    }
+  }
 }
 
 function handleMethod(
@@ -165,8 +264,9 @@ function handleMethod(
   const name = childByType(node, "field_identifier")?.text ?? null;
   if (!typeName || !name) return;
 
-  // parameter_list after receiver
-  const paramLists = namedChildren(node).filter((c) => c.type === "parameter_list");
+  const paramLists = namedChildren(node).filter(
+    (c) => c.type === "parameter_list",
+  );
   const params = paramLists[1] ?? paramLists[0] ?? null;
   const body = childByType(node, "block");
   const key = `${typeName}.${name}`;

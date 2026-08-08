@@ -77,3 +77,92 @@ test("go: receiver methods resolve to Type.Method", ({ expectCallstack }) => {
       └─ Runner.Run()
   `);
 });
+
+test("go: else-if and switch as branches; skips nested funcs", ({
+  expectCallstack,
+}) => {
+  expectCallstack(
+    `
+      package ctrl
+
+      func Handle(x int) {
+        if x == 1 {
+          DoA()
+        } else if x == 2 {
+          DoB()
+    +     DoExtra()
+        } else {
+          DoC()
+        }
+        switch x {
+        case 1:
+          DoA()
+        default:
+          DoC()
+        }
+        go func() { Hidden() }()
+        f := func() { Nested() }
+        _ = f
+    +   Flush()
+      }
+
+      func DoA() {}
+      func DoB() {}
+    + func DoExtra() {}
+      func DoC() {}
+      func Hidden() {}
+      func Nested() {}
+    + func Flush() {}
+    `,
+    "Handle",
+    { file: "ctrl.go" },
+  ).toEqual(`
+      Handle(x)
+      ├─ if x == 1
+         └─ DoA()
+      ├─ else if x == 2
+         ├─ DoB()
+    +    └─ DoExtra()
+      ├─ else
+         └─ DoC()
+      ├─ case 1
+         └─ DoA()
+      ├─ default
+         └─ DoC()
+    + └─ Flush()
+  `);
+});
+
+test("go: NewThing() expands through new Thing alias", ({
+  expectCallstack,
+}) => {
+  expectCallstack(
+    `
+      package ctor
+
+      func Make() {
+        NewThing()
+    +   Also()
+      }
+
+      func NewThing() *Thing {
+        init()
+    +   ready()
+        return &Thing{}
+      }
+
+    + func Also() {}
+      func init() {}
+    + func ready() {}
+      type Thing struct{}
+    `,
+    "Make",
+    { file: "ctor.go" },
+  ).toEqual(`
+      Make()
+      ├─ Thing()
+      │  ├─ init()
+    + │  └─ ready()
+    + └─ Also()
+  `);
+});
