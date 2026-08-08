@@ -47,8 +47,12 @@ export function flattenCallKeys(steps: CallStep[]): string[] {
   const keys: string[] = [];
   const walk = (list: CallStep[]) => {
     for (const step of list) {
-      if (step.type === "call") keys.push(step.key);
-      else walk(step.children);
+      if (step.type === "call") {
+        keys.push(step.key);
+        if (step.children) walk(step.children);
+      } else {
+        walk(step.children);
+      }
     }
   };
   walk(steps);

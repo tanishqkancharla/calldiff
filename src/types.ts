@@ -12,7 +12,12 @@ export interface CallNode {
 
 /** One step in a function body: a call, or a conditional branch with nested steps. */
 export type CallStep =
-  | { type: "call"; key: string }
+  | {
+      type: "call";
+      key: string;
+      /** Inline children (e.g. JSX component children at the call site). */
+      children?: CallStep[];
+    }
   | {
       type: "branch";
       key: string;

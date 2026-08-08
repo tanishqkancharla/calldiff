@@ -29,7 +29,14 @@ function expandSteps(
         ),
       };
     }
-    return expandCall(step.key, index, depth, maxDepth, visiting);
+    return expandCall(
+      step.key,
+      index,
+      depth,
+      maxDepth,
+      visiting,
+      step.children,
+    );
   });
 }
 
@@ -39,6 +46,7 @@ function expandCall(
   depth: number,
   maxDepth: number,
   visiting: Set<string>,
+  inlineChildren?: CallStep[],
 ): CallNode {
   const label = displayCallLabel(key, index);
 
@@ -47,25 +55,29 @@ function expandCall(
   }
 
   const info = index.get(key);
-  if (!info) {
+  if (!info && !inlineChildren?.length) {
     return { key, label, kind: "call", children: [] };
   }
 
-  if (visiting.has(key)) {
+  if (info && visiting.has(key)) {
     return { key, label: `${label} ⇄`, kind: "call", children: [] };
   }
 
-  visiting.add(key);
-  const children = expandSteps(
-    info.steps,
-    index,
-    depth + 1,
-    maxDepth,
-    visiting,
-  );
-  visiting.delete(key);
+  if (info) visiting.add(key);
+  const bodyChildren = info
+    ? expandSteps(info.steps, index, depth + 1, maxDepth, visiting)
+    : [];
+  const callSiteChildren = inlineChildren?.length
+    ? expandSteps(inlineChildren, index, depth + 1, maxDepth, visiting)
+    : [];
+  if (info) visiting.delete(key);
 
-  return { key, label, kind: "call", children };
+  return {
+    key,
+    label,
+    kind: "call",
+    children: [...bodyChildren, ...callSiteChildren],
+  };
 }
 
 /**

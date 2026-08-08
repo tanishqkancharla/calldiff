@@ -58,6 +58,7 @@ calldiff main feature -- src/lib
 - `functionName` — free function
 - `ClassName.method` — class method
 - `new ClassName` — constructor / `new` call
+- `Component` — JSX/TSX component tags (`<Button />`); children nest under the parent
 - `if (cond)` / `else` / `else if (cond)` — conditional arms (no continuing `│` rail)
 
 If you omit `--entry`, calldiff infers exported functions whose expanded call trees changed (and may show several).

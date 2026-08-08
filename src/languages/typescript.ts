@@ -105,6 +105,30 @@ function calleeKey(node: SyntaxNode, className: string | null): string | null {
   return null;
 }
 
+/**
+ * Treat JSX tags as component "calls". PascalCase identifiers and any
+ * member expression (`Foo.Bar`, `motion.div`) count; lowercase tags are HTML.
+ */
+function jsxCalleeKey(node: SyntaxNode): string | null {
+  for (const child of namedChildren(node)) {
+    if (child.type === "identifier") {
+      const name = child.text;
+      return /^[A-Z]/.test(name) ? name : null;
+    }
+    if (child.type === "member_expression") {
+      return calleeKey(child, null);
+    }
+    if (
+      child.type === "jsx_attribute" ||
+      child.type === "jsx_expression" ||
+      child.type === "type_arguments"
+    ) {
+      break;
+    }
+  }
+  return null;
+}
+
 function statementsOf(node: SyntaxNode): SyntaxNode[] {
   if (node.type === "statement_block") return namedChildren(node);
   return [node];
@@ -207,6 +231,56 @@ function collectStatements(
           addCall(key.startsWith("new ") ? key : `new ${key}`, node.startIndex);
         }
       }
+    } else if (type === "jsx_element") {
+      const opening = childByType(node, "jsx_opening_element");
+      const childNodes = namedChildren(node).filter(
+        (c) =>
+          c.type !== "jsx_opening_element" && c.type !== "jsx_closing_element",
+      );
+      const fromAttrs: CallStep[] = [];
+      if (opening) {
+        for (const attr of namedChildren(opening)) {
+          if (
+            attr.type === "jsx_attribute" ||
+            attr.type === "jsx_expression"
+          ) {
+            fromAttrs.push(...collectStatements([attr], className));
+          }
+        }
+      }
+      const nested = [
+        ...fromAttrs,
+        ...collectStatements(childNodes, className),
+      ];
+      if (opening) {
+        const key = jsxCalleeKey(opening);
+        if (key) {
+          if (nested.length > 0) {
+            steps.push({ type: "call", key, children: nested });
+          } else {
+            addCall(key, opening.startIndex);
+          }
+          return;
+        }
+      }
+      for (const step of nested) steps.push(step);
+      return;
+    } else if (type === "jsx_self_closing_element") {
+      const attrNodes = namedChildren(node).filter(
+        (c) => c.type === "jsx_attribute" || c.type === "jsx_expression",
+      );
+      const nested = collectStatements(attrNodes, className);
+      const key = jsxCalleeKey(node);
+      if (key) {
+        if (nested.length > 0) {
+          steps.push({ type: "call", key, children: nested });
+        } else {
+          addCall(key, node.startIndex);
+        }
+      } else {
+        for (const step of nested) steps.push(step);
+      }
+      return;
     }
 
     for (const child of namedChildren(node)) {

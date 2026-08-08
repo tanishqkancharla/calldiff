@@ -488,10 +488,9 @@ test("ignores computed member calls", ({ expectCallstack }) => {
   `);
 });
 
-test("parses TSX files and tracks calls in component bodies", ({
+test("parses TSX files and tracks JSX components as calls", ({
   expectCallstack,
 }) => {
-  // JSX tags are not call_expressions; only explicit calls in the body count.
   expectCallstack(
     `
       export function App() {
@@ -514,7 +513,77 @@ test("parses TSX files and tracks calls in component bodies", ({
   ).toEqual(`
       App()
       ├─ setup()
-    + └─ track()
+    + ├─ track()
+      └─ Button(_props)
+  `);
+});
+
+test("diffs React component trees in TSX", ({ expectCallstack }) => {
+  expectCallstack(
+    `
+      export function UserProfile({ userId }: { userId: string }) {
+        const user = useUser(userId);
+        if (!user) {
+    -     return <Spinner />;
+    +     return <Skeleton />;
+        }
+        return (
+    -     <Card>
+    -       <Avatar src={user.avatar} />
+    -       <FollowButton userId={userId} />
+    -     </Card>
+    +     <ProfileLayout>
+    +       <Avatar src={user.avatar} />
+    +       <UserMeta user={user} />
+    +       <FollowButton userId={userId} />
+    +     </ProfileLayout>
+        );
+      }
+
+      function useUser(_id: string) {
+        return null as null | { avatar: string; name: string };
+      }
+    - function Spinner() {
+    -   return null;
+    - }
+    + function Skeleton() {
+    +   return null;
+    + }
+    - function Card(_props: { children?: unknown }) {
+    -   return null;
+    - }
+    + function ProfileLayout(_props: { children?: unknown }) {
+    +   return null;
+    + }
+      function Avatar(_props: { src: string }) {
+        return null;
+      }
+    + function UserMeta(_props: { user: { name: string } }) {
+    +   return null;
+    + }
+      function FollowButton(_props: { userId: string }) {
+        trackFollow();
+        return null;
+      }
+      function trackFollow() {}
+    `,
+    "UserProfile",
+    { file: "UserProfile.tsx" },
+  ).toEqual(`
+      UserProfile({})
+      ├─ useUser(_id)
+      ├─ if (!user)
+    -    ├─ Spinner()
+    +    └─ Skeleton()
+    - ├─ Card(_props)
+    - │  ├─ Avatar(_props)
+    - │  └─ FollowButton(_props)
+    - │     └─ trackFollow()
+    + └─ ProfileLayout(_props)
+    +    ├─ Avatar(_props)
+    +    ├─ UserMeta(_props)
+    +    └─ FollowButton(_props)
+    +       └─ trackFollow()
   `);
 });
 

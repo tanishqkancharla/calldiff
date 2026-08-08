@@ -245,23 +245,38 @@ test("javascript: extracts generator and exported arrow bodies", ({
   `);
 });
 
-test("javascript: follows export const arrow entrypoints", ({
+test("javascript: tracks JSX components as nested calls", ({
   expectCallstack,
 }) => {
   expectCallstack(
     `
-      export const boot = () => {
-        load();
-    +   migrate();
-      };
-      function load() {}
-    + function migrate() {}
+      export function App() {
+        setup();
+        return (
+    -     <Layout>
+    -       <Header />
+    -     </Layout>
+    +     <Shell>
+    +       <Header />
+    +       <Sidebar />
+    +     </Shell>
+        );
+      }
+      function setup() {}
+    - function Layout(props) { return null; }
+    + function Shell(props) { return null; }
+      function Header() { return null; }
+    + function Sidebar() { return null; }
     `,
-    "boot",
-    { file: "boot.js" },
+    "App",
+    { file: "app.jsx" },
   ).toEqual(`
-      boot()
-      ├─ load()
-    + └─ migrate()
+      App()
+      ├─ setup()
+    - ├─ Layout(props)
+    - │  └─ Header()
+    + └─ Shell(props)
+    +    ├─ Header()
+    +    └─ Sidebar()
   `);
 });
