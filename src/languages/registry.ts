@@ -8,7 +8,7 @@ import { elixirExtractor } from "./elixir.js";
 import { goExtractor } from "./go.js";
 import { haskellExtractor } from "./haskell.js";
 import { javaExtractor } from "./java.js";
-import { javascriptExtractor } from "./javascript.js";
+import { javascriptExtractor, javascriptreactExtractor } from "./javascript.js";
 import { kotlinExtractor } from "./kotlin.js";
 import { luaExtractor } from "./lua.js";
 import { ocamlExtractor } from "./ocaml.js";
@@ -21,14 +21,15 @@ import { solidityExtractor } from "./solidity.js";
 import { swiftExtractor } from "./swift.js";
 import {
   typescriptExtractor,
-  tsxExtractor,
+  typescriptreactExtractor,
 } from "./typescript.js";
 import { zigExtractor } from "./zig.js";
 
 const extractors: LanguageExtractor[] = [
   typescriptExtractor,
-  tsxExtractor,
+  typescriptreactExtractor,
   javascriptExtractor,
+  javascriptreactExtractor,
   pythonExtractor,
   goExtractor,
   rustExtractor,

@@ -644,7 +644,15 @@ function extractFromTree(
 
 export const javascriptExtractor: LanguageExtractor = {
   id: "javascript",
-  extensions: [".js", ".jsx", ".mjs", ".cjs"],
+  extensions: [".js", ".mjs", ".cjs"],
+  grammarPackage: "tree-sitter-javascript",
+  extract: extractFromTree,
+};
+
+/** JSX (.jsx) — same grammar as JS; tree-sitter-javascript parses both. */
+export const javascriptreactExtractor: LanguageExtractor = {
+  id: "javascriptreact",
+  extensions: [".jsx"],
   grammarPackage: "tree-sitter-javascript",
   extract: extractFromTree,
 };

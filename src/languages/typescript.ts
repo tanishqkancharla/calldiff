@@ -543,8 +543,9 @@ export const typescriptExtractor: LanguageExtractor = {
   extract: extractFromTree,
 };
 
-export const tsxExtractor: LanguageExtractor = {
-  id: "tsx",
+/** TSX (.tsx) — separate tree-sitter-typescript grammar export from plain TS. */
+export const typescriptreactExtractor: LanguageExtractor = {
+  id: "typescriptreact",
   extensions: [".tsx"],
   grammarPackage: "tree-sitter-typescript",
   grammarExport: "tsx",
