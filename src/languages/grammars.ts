@@ -44,14 +44,80 @@ function ensureCachePackageJson(cacheDir: string): void {
 }
 
 /**
+ * Some grammar packages (e.g. tree-sitter-c-sharp ≥0.23.5) ship ESM bindings
+ * with top-level await, which `require()` cannot load. Fall back to the native
+ * `.node` addon via node-gyp-build — same payload the JS wrapper would return.
+ */
+function loadNativeBinding(packageRoot: string): GrammarModule | null {
+  try {
+    const require = createRequire(join(packageRoot, "package.json"));
+    const gypBuild = require("node-gyp-build") as (
+      root: string,
+    ) => GrammarModule;
+    const binding = gypBuild(packageRoot);
+    try {
+      (binding as { nodeTypeInfo?: unknown }).nodeTypeInfo = require(
+        join(packageRoot, "src", "node-types.json"),
+      );
+    } catch {
+      // optional metadata
+    }
+    return binding;
+  } catch {
+    return null;
+  }
+}
+
+function requireGrammar(
+  require: NodeRequire,
+  npmPackage: string,
+  packageRoot: string,
+): GrammarModule {
+  try {
+    return require(npmPackage) as GrammarModule;
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException)?.code;
+    const msg = err instanceof Error ? err.message : String(err);
+    if (
+      code === "ERR_REQUIRE_ASYNC_MODULE" ||
+      msg.includes("top-level await")
+    ) {
+      const binding = loadNativeBinding(packageRoot);
+      if (binding) return binding;
+    }
+    throw err;
+  }
+}
+
+/** Packages that need a pinned install spec (latest breaks createRequire). */
+const INSTALL_SPEC: Record<string, string> = {
+  "tree-sitter-c-sharp": "tree-sitter-c-sharp@0.23.1",
+};
+
+/**
  * Install an npm grammar package into the shared cache if missing, then require it.
  * Reuses the cache across CLI invocations.
  */
 export function loadGrammarPackage(npmPackage: string): GrammarModule {
   // Prefer the app's own dependency when present (e.g. tree-sitter-typescript).
   try {
-    const local = createRequire(import.meta.url)(npmPackage);
-    if (local) return local as GrammarModule;
+    const localRequire = createRequire(import.meta.url);
+    try {
+      return localRequire(npmPackage) as GrammarModule;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException)?.code;
+      const msg = err instanceof Error ? err.message : String(err);
+      if (
+        code === "ERR_REQUIRE_ASYNC_MODULE" ||
+        msg.includes("top-level await")
+      ) {
+        const entry = localRequire.resolve(npmPackage);
+        const packageRoot = join(entry, "..", "..");
+        const binding = loadNativeBinding(packageRoot);
+        if (binding) return binding;
+      }
+      throw err;
+    }
   } catch {
     // fall through to cache
   }
@@ -59,9 +125,19 @@ export function loadGrammarPackage(npmPackage: string): GrammarModule {
   const cacheDir = grammarCacheDir();
   if (!packageInstalled(cacheDir, npmPackage)) {
     ensureCachePackageJson(cacheDir);
+    const installSpec = INSTALL_SPEC[npmPackage] ?? npmPackage;
     execFileSync(
       "npm",
-      ["install", "--prefix", cacheDir, "--no-save", "--no-fund", "--no-audit", npmPackage],
+      [
+        "install",
+        "--prefix",
+        cacheDir,
+        "--no-save",
+        "--no-fund",
+        "--no-audit",
+        "--legacy-peer-deps",
+        installSpec,
+      ],
       {
         stdio: ["ignore", "pipe", "pipe"],
         env: process.env,
@@ -70,7 +146,8 @@ export function loadGrammarPackage(npmPackage: string): GrammarModule {
   }
 
   const require = createRequire(join(cacheDir, "package.json"));
-  return require(npmPackage) as GrammarModule;
+  const packageRoot = join(cacheDir, "node_modules", npmPackage);
+  return requireGrammar(require, npmPackage, packageRoot);
 }
 
 /** Resolve the value to pass to parser.setLanguage. */
@@ -93,7 +170,9 @@ export function readCachedPackageVersion(
   const pkgJson = join(cacheDir, "node_modules", npmPackage, "package.json");
   if (!existsSync(pkgJson)) return null;
   try {
-    const raw = JSON.parse(readFileSync(pkgJson, "utf8")) as { version?: string };
+    const raw = JSON.parse(readFileSync(pkgJson, "utf8")) as {
+      version?: string;
+    };
     return raw.version ?? null;
   } catch {
     return null;
