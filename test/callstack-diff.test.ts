@@ -301,3 +301,314 @@ test("extracts methods on abstract classes", ({ expectCallstack }) => {
     + └─ finish()
   `);
 });
+
+test("expands new Class() through the constructor", ({ expectCallstack }) => {
+  expectCallstack(
+    `
+      export function make() {
+        new Thing();
+      }
+      class Thing {
+        constructor() {
+          init();
+    +     ready();
+        }
+      }
+      function init() {}
+    + function ready() {}
+    `,
+    "make",
+  ).toEqual(`
+      make()
+      └─ new Thing()
+         ├─ init()
+    +    └─ ready()
+  `);
+});
+
+test("follows const arrow function declarations", ({ expectCallstack }) => {
+  expectCallstack(
+    `
+      export const boot = () => {
+        load();
+    +   migrate();
+      };
+      function load() {}
+    + function migrate() {}
+    `,
+    "boot",
+  ).toEqual(`
+      boot()
+      ├─ load()
+    + └─ migrate()
+  `);
+});
+
+test("names anonymous default exports as default", ({ expectCallstack }) => {
+  expectCallstack(
+    `
+      export default function () {
+        work();
+    +   extra();
+      }
+      function work() {}
+    + function extra() {}
+    `,
+    "default",
+  ).toEqual(`
+      default()
+      ├─ work()
+    + └─ extra()
+  `);
+});
+
+test("extracts generator function bodies", ({ expectCallstack }) => {
+  expectCallstack(
+    `
+      export function* gen() {
+        yield work();
+    +   yield extra();
+        done();
+      }
+      function work() { return 1; }
+    + function extra() { return 2; }
+      function done() {}
+    `,
+    "gen",
+  ).toEqual(`
+      gen()
+      ├─ work()
+    + ├─ extra()
+      └─ done()
+  `);
+});
+
+test("indexes getters and walks their bodies", ({ expectCallstack }) => {
+  expectCallstack(
+    `
+      export class Config {
+        get value() {
+          load();
+    +     validate();
+          return 1;
+        }
+      }
+      function load() {}
+    + function validate() {}
+    `,
+    "Config.value",
+  ).toEqual(`
+      Config.value()
+      ├─ load()
+    + └─ validate()
+  `);
+});
+
+test("labels super.method as ClassName.method without linking base", ({
+  expectCallstack,
+}) => {
+  // super.setup() is keyed as Child.setup (current class), so Base.setup is not expanded.
+  expectCallstack(
+    `
+      class Base {
+        setup() {
+          prep();
+        }
+      }
+      export class Child extends Base {
+        start() {
+          super.setup();
+    +     work();
+        }
+      }
+      function prep() {}
+    + function work() {}
+    `,
+    "Child.start",
+  ).toEqual(`
+      Child.start()
+      ├─ Child.setup()
+    + └─ work()
+  `);
+});
+
+test("collects calls inside try/catch/finally and loops", ({
+  expectCallstack,
+}) => {
+  expectCallstack(
+    `
+      export function boot(items: string[]) {
+        try {
+          open();
+        } catch {
+          recover();
+        } finally {
+          close();
+        }
+        for (const item of items) {
+          visit(item);
+        }
+    +   while (pending()) {
+    +     flush();
+    +   }
+      }
+      function open() {}
+      function recover() {}
+      function close() {}
+      function visit(_item: string) {}
+    + function pending() { return false; }
+    + function flush() {}
+    `,
+    "boot",
+  ).toEqual(`
+      boot(items)
+      ├─ open()
+      ├─ recover()
+      ├─ close()
+      ├─ visit(_item)
+    + ├─ pending()
+    + └─ flush()
+  `);
+});
+
+test("ignores computed member calls", ({ expectCallstack }) => {
+  expectCallstack(
+    `
+      export function run(obj: Record<string, Function>, key: string) {
+        obj[key]();
+        obj.known();
+    +   obj.other();
+      }
+    `,
+    "run",
+  ).toEqual(`
+      run(obj, key)
+      ├─ obj.known()
+    + └─ obj.other()
+  `);
+});
+
+test("parses TSX files and tracks calls in component bodies", ({
+  expectCallstack,
+}) => {
+  // JSX tags are not call_expressions; only explicit calls in the body count.
+  expectCallstack(
+    `
+      export function App() {
+        setup();
+    +   track();
+        return <Button onClick={handle} />;
+      }
+      function setup() {}
+    + function track() {}
+      function handle() {
+        click();
+      }
+      function click() {}
+      function Button(_props: { onClick(): void }) {
+        return null;
+      }
+    `,
+    "App",
+    { file: "app.tsx" },
+  ).toEqual(`
+      App()
+      ├─ setup()
+    + └─ track()
+  `);
+});
+
+test("marks recursive cycles with a turnstile", ({ expectCallstack }) => {
+  expectCallstack(
+    `
+      export function a() {
+        b();
+      }
+      function b() {
+        a();
+    +   c();
+      }
+    + function c() {}
+    `,
+    "a",
+  ).toEqual(`
+      a()
+      └─ b()
+         ├─ a() ⇄
+    +    └─ c()
+  `);
+});
+
+test("truncates expansion at maxDepth", ({ expectCallstack }) => {
+  // Deeper edits under c() are hidden once maxDepth stops expanding it.
+  expectCallstack(
+    `
+      export function a() {
+        b();
+    +   extra();
+      }
+      function b() {
+        c();
+      }
+      function c() {
+        d();
+    +   e();
+      }
+      function d() {}
+    + function e() {}
+    + function extra() {}
+    `,
+    "a",
+    { maxDepth: 2 },
+  ).toEqual(`
+      a()
+      ├─ b()
+      │  └─ c()
+    + └─ extra()
+  `);
+});
+
+test("LCS-aligns reordered sibling calls", ({ expectCallstack }) => {
+  expectCallstack(
+    `
+      export function boot() {
+    -   first();
+        second();
+    +   first();
+      }
+      function first() {}
+      function second() {}
+    `,
+    "boot",
+  ).toEqual(`
+      boot()
+    - ├─ first()
+      ├─ second()
+    + └─ first()
+  `);
+});
+
+test("shows a newly introduced callee subtree as added", ({
+  expectCallstack,
+}) => {
+  expectCallstack(
+    `
+      export function main() {
+    +   boot();
+        work();
+      }
+    +
+    + function boot() {
+    +   setup();
+    + }
+    + function setup() {}
+      function work() {}
+    `,
+    "main",
+  ).toEqual(`
+      main()
+    + ├─ boot()
+    + │  └─ setup()
+      └─ work()
+  `);
+});

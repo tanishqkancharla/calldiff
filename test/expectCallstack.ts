@@ -1,6 +1,9 @@
 import { test as base, expect } from "vitest";
 import { diffOutdent } from "./diff-outdent.js";
-import { callstackDiff } from "./helpers.js";
+import {
+  callstackDiff,
+  type CallstackDiffOptions,
+} from "./helpers.js";
 
 type CallstackAssertion = {
   toEqual: (expected: string) => void;
@@ -15,11 +18,15 @@ export const test = base.extend<{
    * `expectCallstack(diff, symbol).toEqual(callstackDiff)` —
    * both strings are automatically outdented for +/- markers.
    */
-  expectCallstack: (diff: string, symbol: string) => CallstackAssertion;
+  expectCallstack: (
+    diff: string,
+    symbol: string,
+    options?: CallstackDiffOptions,
+  ) => CallstackAssertion;
 }>({
   expectCallstack: async ({}, use) => {
-    await use((diff, symbol) => {
-      const actual = callstackDiff(diffOutdent(diff), symbol);
+    await use((diff, symbol, options) => {
+      const actual = callstackDiff(diffOutdent(diff), symbol, options);
       return {
         toEqual(expected: string) {
           expect(actual).toBe(diffOutdent(expected));

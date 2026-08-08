@@ -3,6 +3,12 @@ import { diffTrees } from "../src/diff.js";
 import { buildIndex, extractFunctions } from "../src/extract.js";
 import { renderDiff } from "../src/render.js";
 
+export type CallstackDiffOptions = {
+  maxDepth?: number;
+  /** Filename used for language detection (e.g. `file.tsx`). */
+  file?: string;
+};
+
 /**
  * Reconstruct before/after file contents from a unified-style diff.
  *
@@ -56,6 +62,14 @@ export function sourcesFromFileDiff(fileDiff: string): {
   };
 }
 
+function snapshotNames(file: string): { before: string; after: string } {
+  const match = file.match(/(\.[^.]+)$/);
+  const ext = match?.[1] ?? ".ts";
+  const base = match ? file.slice(0, -ext.length) : file;
+  const stem = base || "file";
+  return { before: `${stem}.before${ext}`, after: `${stem}.after${ext}` };
+}
+
 /**
  * Diff callstacks for an entrypoint given a TypeScript file diff.
  * Returns colorless ASCII output suitable for assertions.
@@ -63,13 +77,17 @@ export function sourcesFromFileDiff(fileDiff: string): {
 export function callstackDiff(
   fileDiff: string,
   entry: string,
-  maxDepth = 12,
+  options: CallstackDiffOptions = {},
 ): string {
+  const maxDepth = options.maxDepth ?? 12;
+  const { before: beforeName, after: afterName } = snapshotNames(
+    options.file ?? "file.ts",
+  );
   const { before: beforeSource, after: afterSource } =
     sourcesFromFileDiff(fileDiff);
 
-  const before = buildIndex(extractFunctions("before.ts", beforeSource));
-  const after = buildIndex(extractFunctions("after.ts", afterSource));
+  const before = buildIndex(extractFunctions(beforeName, beforeSource));
+  const after = buildIndex(extractFunctions(afterName, afterSource));
 
   const beforeTree = buildCallTree(entry, before, maxDepth);
   const afterTree = buildCallTree(entry, after, maxDepth);
