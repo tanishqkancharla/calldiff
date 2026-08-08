@@ -1,4 +1,4 @@
-import { test } from "./test.js";
+import { test } from "./expectCallstack.js";
 
 test("refactors calls into a helper, preserves if/else branch labels", ({
   expectCallstack,
