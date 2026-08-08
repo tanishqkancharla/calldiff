@@ -1,30 +1,30 @@
 import { test as base, expect } from "vitest";
-import { fixture as fixtureTag } from "./fixture.js";
+import { diffOutdent } from "./diff-outdent.js";
 import { callstackDiff } from "./helpers.js";
+
+type CallstackAssertion = {
+  toEqual: (expected: string) => void;
+};
 
 /**
  * Vitest fixtures for the callstack-diff test format:
  * a +/- TypeScript file diff in, ASCII callstack diff out.
  */
 export const test = base.extend<{
-  /** Outdenting +/- template tag used for file and callstack fixtures. */
-  fixture: typeof fixtureTag;
   /**
-   * Assert that `fileDiff` at `entry` renders as `expected` (also typically a
-   * `fixture` template).
+   * `expectCallstack(diff, symbol).toEqual(callstackDiff)` —
+   * both strings are automatically outdented for +/- markers.
    */
-  expectCallstack: (
-    fileDiff: string,
-    entry: string,
-    expected: string,
-  ) => void;
+  expectCallstack: (diff: string, symbol: string) => CallstackAssertion;
 }>({
-  fixture: async ({}, use) => {
-    await use(fixtureTag);
-  },
   expectCallstack: async ({}, use) => {
-    await use((fileDiff, entry, expected) => {
-      expect(callstackDiff(fileDiff, entry)).toBe(expected);
+    await use((diff, symbol) => {
+      const actual = callstackDiff(diffOutdent(diff), symbol);
+      return {
+        toEqual(expected: string) {
+          expect(actual).toBe(diffOutdent(expected));
+        },
+      };
     });
   },
 });

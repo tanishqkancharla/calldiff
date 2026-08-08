@@ -1,18 +1,10 @@
 /**
- * Template tag for +/- fixtures (file diffs and callstack diffs).
+ * Outdent +/- diff strings (file diffs and callstack diffs).
  *
- * Unlike plain `outdent`, lines that start with `+` / `-` set the indent
+ * Unlike plain outdent, lines that start with `+` / `-` set the indent
  * level — so markers aren't eaten when unchanged lines are indented further.
  */
-export function fixture(
-  strings: TemplateStringsArray,
-  ...values: unknown[]
-): string {
-  let text = strings[0] ?? "";
-  for (let i = 0; i < values.length; i++) {
-    text += String(values[i]) + (strings[i + 1] ?? "");
-  }
-
+export function diffOutdent(text: string): string {
   if (text.startsWith("\n")) text = text.slice(1);
   if (text.endsWith("\n")) text = text.slice(0, -1);
 

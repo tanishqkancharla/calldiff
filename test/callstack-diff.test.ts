@@ -1,11 +1,10 @@
 import { test } from "./test.js";
 
 test("refactors calls into a helper, preserves if/else branch labels", ({
-  fixture,
   expectCallstack,
 }) => {
   expectCallstack(
-    fixture`
+    `
       export class PiService {
         static createAgentSession(options: { sessionId?: string }) {
     -     AuthStorage.create();
@@ -49,7 +48,7 @@ test("refactors calls into a helper, preserves if/else branch labels", ({
       function createCodingTools() {}
     `,
     "PiService.createAgentSession",
-    fixture`
+  ).toEqual(`
       PiService.createAgentSession(options)
     - ├─ AuthStorage.create()
     - ├─ new ModelRegistry()
@@ -64,13 +63,12 @@ test("refactors calls into a helper, preserves if/else branch labels", ({
          └─ SessionManager.create()
       └─ else
          └─ SessionManager.open(_id)
-    `,
-  );
+  `);
 });
 
-test("adds and removes free function calls", ({ fixture, expectCallstack }) => {
+test("adds and removes free function calls", ({ expectCallstack }) => {
   expectCallstack(
-    fixture`
+    `
       export function boot() {
         loadConfig();
     +   migrate();
@@ -82,21 +80,19 @@ test("adds and removes free function calls", ({ fixture, expectCallstack }) => {
       function connect() {}
     `,
     "boot",
-    fixture`
+  ).toEqual(`
       boot()
       ├─ loadConfig()
     + ├─ migrate()
       └─ connect()
-    `,
-  );
+  `);
 });
 
 test("shows ClassName.method labels for this.method calls", ({
-  fixture,
   expectCallstack,
 }) => {
   expectCallstack(
-    fixture`
+    `
       export class Runner {
         start() {
           this.prepare();
@@ -109,21 +105,17 @@ test("shows ClassName.method labels for this.method calls", ({
       }
     `,
     "Runner.start",
-    fixture`
+  ).toEqual(`
       Runner.start()
       ├─ Runner.prepare()
     + ├─ Runner.validate()
       └─ Runner.run()
-    `,
-  );
+  `);
 });
 
-test("labels else-if chains from source text", ({
-  fixture,
-  expectCallstack,
-}) => {
+test("labels else-if chains from source text", ({ expectCallstack }) => {
   expectCallstack(
-    fixture`
+    `
       export function handle(status: string) {
         if (status === "a") {
           doA();
@@ -141,7 +133,7 @@ test("labels else-if chains from source text", ({
       function doOther() {}
     `,
     "handle",
-    fixture`
+  ).toEqual(`
       handle(status)
       ├─ if (status === "a")
          └─ doA()
@@ -150,16 +142,12 @@ test("labels else-if chains from source text", ({
     +    └─ doExtra()
       └─ else
          └─ doOther()
-    `,
-  );
+  `);
 });
 
-test("marks a fully removed callee subtree", ({
-  fixture,
-  expectCallstack,
-}) => {
+test("marks a fully removed callee subtree", ({ expectCallstack }) => {
   expectCallstack(
-    fixture`
+    `
       export function main() {
     -   setup();
         work();
@@ -173,41 +161,33 @@ test("marks a fully removed callee subtree", ({
       function work() {}
     `,
     "main",
-    fixture`
+  ).toEqual(`
       main()
     - ├─ setup()
     - │  └─ initDb()
       └─ work()
-    `,
-  );
+  `);
 });
 
-test("resolves optional chaining as a normal call", ({
-  fixture,
-  expectCallstack,
-}) => {
+test("resolves optional chaining as a normal call", ({ expectCallstack }) => {
   expectCallstack(
-    fixture`
+    `
       export function boot(svc?: { start(): void }) {
         svc?.start();
     +   foo?.bar();
       }
     `,
     "boot",
-    fixture`
+  ).toEqual(`
       boot(svc)
       ├─ svc.start()
     + └─ foo.bar()
-    `,
-  );
+  `);
 });
 
-test("indexes and expands #private methods", ({
-  fixture,
-  expectCallstack,
-}) => {
+test("indexes and expands #private methods", ({ expectCallstack }) => {
   expectCallstack(
-    fixture`
+    `
       export class Vault {
         open() {
           this.#unlock();
@@ -221,21 +201,17 @@ test("indexes and expands #private methods", ({
     + function audit() {}
     `,
     "Vault.open",
-    fixture`
+  ).toEqual(`
       Vault.open()
       └─ Vault.#unlock()
          ├─ prep()
     +    └─ audit()
-    `,
-  );
+  `);
 });
 
-test("follows class field arrow functions", ({
-  fixture,
-  expectCallstack,
-}) => {
+test("follows class field arrow functions", ({ expectCallstack }) => {
   expectCallstack(
-    fixture`
+    `
       export class Runner {
         start() {
           this.helper();
@@ -249,21 +225,19 @@ test("follows class field arrow functions", ({
     + function extra() {}
     `,
     "Runner.start",
-    fixture`
+  ).toEqual(`
       Runner.start()
       └─ Runner.helper()
          ├─ work()
     +    └─ extra()
-    `,
-  );
+  `);
 });
 
 test("does not attribute nested function bodies to the caller", ({
-  fixture,
   expectCallstack,
 }) => {
   expectCallstack(
-    fixture`
+    `
       export function outer() {
         function inner() {
           hidden();
@@ -280,42 +254,37 @@ test("does not attribute nested function bodies to the caller", ({
     + function alsoVisible() {}
     `,
     "outer",
-    fixture`
+  ).toEqual(`
       outer()
       ├─ visible()
     + └─ alsoVisible()
-    `,
-  );
+  `);
 });
 
-test("treats tagged templates as calls", ({ fixture, expectCallstack }) => {
+test("treats tagged templates as calls", ({ expectCallstack }) => {
   expectCallstack(
-    [
-      "export function boot() {",
-      "  css`color: red`;",
-      "+ html`<div/>`;",
-      "  work();",
-      "}",
-      "function css(_s: TemplateStringsArray) {}",
-      "+ function html(_s: TemplateStringsArray) {}",
-      "function work() {}",
-    ].join("\n"),
+    `
+      export function boot() {
+        css\`color: red\`;
+    +   html\`<div/>\`;
+        work();
+      }
+      function css(_s: TemplateStringsArray) {}
+    + function html(_s: TemplateStringsArray) {}
+      function work() {}
+    `,
     "boot",
-    fixture`
+  ).toEqual(`
       boot()
       ├─ css(_s)
     + ├─ html(_s)
       └─ work()
-    `,
-  );
+  `);
 });
 
-test("extracts methods on abstract classes", ({
-  fixture,
-  expectCallstack,
-}) => {
+test("extracts methods on abstract classes", ({ expectCallstack }) => {
   expectCallstack(
-    fixture`
+    `
       export abstract class Service {
         abstract prep(): void;
         start() {
@@ -326,10 +295,9 @@ test("extracts methods on abstract classes", ({
     + function finish() {}
     `,
     "Service.start",
-    fixture`
+  ).toEqual(`
       Service.start()
       ├─ Service.prep()
     + └─ finish()
-    `,
-  );
+  `);
 });
