@@ -3,8 +3,12 @@ import { buildCallTree } from "../src/calltree.js";
 import { diffTrees } from "../src/diff.js";
 import { buildIndex, extractFunctions } from "../src/extract.js";
 import { loadGrammarPackage, resolveLanguage } from "../src/languages/grammars.js";
+import { cExtractor } from "../src/languages/c.js";
+import { cppExtractor } from "../src/languages/cpp.js";
+import { csharpExtractor } from "../src/languages/csharp.js";
 import { javascriptExtractor } from "../src/languages/javascript.js";
 import { javaExtractor } from "../src/languages/java.js";
+import { phpExtractor } from "../src/languages/php.js";
 import { rubyExtractor } from "../src/languages/ruby.js";
 import { rustExtractor } from "../src/languages/rust.js";
 import { detectLanguage } from "../src/languages/registry.js";
@@ -21,6 +25,10 @@ const pendingExtractors: LanguageExtractor[] = [
   rustExtractor,
   javaExtractor,
   rubyExtractor,
+  cExtractor,
+  cppExtractor,
+  csharpExtractor,
+  phpExtractor,
 ];
 
 const pendingByExt = new Map<string, LanguageExtractor>();
