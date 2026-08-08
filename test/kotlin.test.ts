@@ -84,3 +84,167 @@ test("kotlin: this.method resolves to Class.method", ({ expectCallstack }) => {
       └─ Runner.run()
   `);
 });
+
+test("kotlin: Thing() expands through init block", ({ expectCallstack }) => {
+  expectCallstack(
+    `
+      fun make() {
+        Thing()
+      }
+      class Thing {
+        init {
+          setup()
+    +     ready()
+        }
+      }
+      fun setup() {}
+    + fun ready() {}
+    `,
+    "make",
+    { file: "ctor.kt" },
+  ).toEqual(`
+      make()
+      └─ Thing()
+         ├─ setup()
+    +    └─ ready()
+  `);
+});
+
+test("kotlin: skips nested functions and lambdas", ({ expectCallstack }) => {
+  expectCallstack(
+    `
+      fun outer() {
+        fun nested() { hidden() }
+        val f = { alsoHidden() }
+        visible()
+    +   alsoVisible()
+      }
+      fun hidden() {}
+      fun alsoHidden() {}
+      fun visible() {}
+    + fun alsoVisible() {}
+    `,
+    "outer",
+    { file: "nested.kt" },
+  ).toEqual(`
+      outer()
+      ├─ visible()
+    + └─ alsoVisible()
+  `);
+});
+
+test("kotlin: else-if chains", ({ expectCallstack }) => {
+  expectCallstack(
+    `
+      fun handle(status: String) {
+        if (status == "a") {
+          doA()
+        } else if (status == "b") {
+          doB()
+    +     doExtra()
+        } else {
+          doOther()
+        }
+      }
+      fun doA() {}
+      fun doB() {}
+    + fun doExtra() {}
+      fun doOther() {}
+    `,
+    "handle",
+    { file: "elif.kt" },
+  ).toEqual(`
+      handle(status)
+      ├─ if status == "a"
+         └─ doA()
+      ├─ else if status == "b"
+         ├─ doB()
+    +    └─ doExtra()
+      └─ else
+         └─ doOther()
+  `);
+});
+
+test("kotlin: try/catch/finally and when as branches", ({
+  expectCallstack,
+}) => {
+  expectCallstack(
+    `
+      fun boot(x: Int) {
+        try {
+          openIt()
+        } catch (e: Exception) {
+          recover()
+        } finally {
+          closeIt()
+        }
+        when (x) {
+          1 -> doA()
+          else -> doOther()
+        }
+    +   flush()
+      }
+      fun openIt() {}
+      fun recover() {}
+      fun closeIt() {}
+      fun doA() {}
+      fun doOther() {}
+    + fun flush() {}
+    `,
+    "boot",
+    { file: "ctrl.kt" },
+  ).toEqual(`
+      boot(x)
+      ├─ try
+         └─ openIt()
+      ├─ catch Exception
+         └─ recover()
+      ├─ finally
+         └─ closeIt()
+      ├─ case 1
+         └─ doA()
+      ├─ else
+         └─ doOther()
+    + └─ flush()
+  `);
+});
+
+test("kotlin: companion object and object methods", ({ expectCallstack }) => {
+  expectCallstack(
+    `
+      fun boot() {
+        Helper.run()
+        Thing.make()
+    +   Thing.extra()
+      }
+      object Helper {
+        fun run() {
+          go()
+        }
+      }
+      class Thing {
+        companion object {
+          fun make() {
+            work()
+          }
+    +     fun extra() {
+    +       more()
+    +     }
+        }
+      }
+      fun go() {}
+      fun work() {}
+    + fun more() {}
+    `,
+    "boot",
+    { file: "companion.kt" },
+  ).toEqual(`
+      boot()
+      ├─ Helper.run()
+      │  └─ go()
+      ├─ Thing.make()
+      │  └─ work()
+    + └─ Thing.extra()
+    +    └─ more()
+  `);
+});

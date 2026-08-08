@@ -88,6 +88,46 @@ function collectStatements(
     steps.push({ type: "call", key });
   };
 
+  const pushIfChain = (node: SyntaxNode, asElseIf: boolean): void => {
+    const kids = namedChildren(node);
+    const stmtBlocks = kids.filter((c) => c.type === "statements");
+    const nestedIf = kids.find((c) => c.type === "if_statement") ?? null;
+    const cond =
+      kids.find(
+        (c) =>
+          c.type !== "statements" &&
+          c.type !== "else" &&
+          c.type !== "if_statement",
+      ) ?? null;
+    const condText = cond ? collapseWs(cond.text) : "";
+    const kind = asElseIf ? "else-if" : "if";
+    const labelKind = asElseIf ? "else if" : "if";
+
+    steps.push({
+      type: "branch",
+      key: condText ? `${kind}:${condText}` : kind,
+      label: condText ? `${labelKind} ${condText}` : labelKind,
+      children: collectStatements(
+        statementsOf(stmtBlocks[0] ?? null),
+        className,
+      ),
+    });
+
+    if (nestedIf) {
+      pushIfChain(nestedIf, true);
+      return;
+    }
+
+    if (stmtBlocks[1]) {
+      steps.push({
+        type: "branch",
+        key: "else",
+        label: "else",
+        children: collectStatements(statementsOf(stmtBlocks[1]), className),
+      });
+    }
+  };
+
   const walk = (node: SyntaxNode): void => {
     if (
       node.type === "function_declaration" ||
@@ -99,29 +139,64 @@ function collectStatements(
     }
 
     if (node.type === "if_statement") {
-      const kids = namedChildren(node);
-      const stmtBlocks = kids.filter((c) => c.type === "statements");
-      const cond =
-        kids.find(
-          (c) => c.type !== "statements" && c.type !== "else",
-        ) ?? null;
-      const condText = cond ? collapseWs(cond.text) : "";
+      pushIfChain(node, false);
+      return;
+    }
+
+    if (node.type === "do_statement") {
+      const doBody = childByType(node, "statements");
       steps.push({
         type: "branch",
-        key: condText ? `if:${condText}` : "if",
-        label: condText ? `if ${condText}` : "if",
-        children: collectStatements(
-          statementsOf(stmtBlocks[0] ?? null),
-          className,
-        ),
+        key: "do",
+        label: "do",
+        children: doBody
+          ? collectStatements(namedChildren(doBody), className)
+          : [],
       });
-      if (stmtBlocks[1]) {
-        steps.push({
-          type: "branch",
-          key: "else",
-          label: "else",
-          children: collectStatements(statementsOf(stmtBlocks[1]), className),
-        });
+      for (const clause of namedChildren(node)) {
+        if (clause.type === "catch_block") {
+          const body = childByType(clause, "statements");
+          steps.push({
+            type: "branch",
+            key: "catch",
+            label: "catch",
+            children: body
+              ? collectStatements(namedChildren(body), className)
+              : [],
+          });
+        }
+      }
+      return;
+    }
+
+    if (node.type === "switch_statement") {
+      for (const entry of namedChildren(node)) {
+        if (entry.type !== "switch_entry") continue;
+        const pattern = childByType(entry, "switch_pattern");
+        const isDefault = namedChildren(entry).some(
+          (c) => c.type === "default_keyword",
+        );
+        const body = childByType(entry, "statements");
+        if (isDefault || !pattern) {
+          steps.push({
+            type: "branch",
+            key: "default",
+            label: "default",
+            children: body
+              ? collectStatements(namedChildren(body), className)
+              : [],
+          });
+        } else {
+          const text = collapseWs(pattern.text);
+          steps.push({
+            type: "branch",
+            key: text ? `case:${text}` : "case",
+            label: text ? `case ${text}` : "case",
+            children: body
+              ? collectStatements(namedChildren(body), className)
+              : [],
+          });
+        }
       }
       return;
     }
@@ -133,6 +208,12 @@ function collectStatements(
         if (key) addCall(key, node.startIndex);
       }
       for (const child of namedChildren(node).slice(1)) walk(child);
+      return;
+    }
+
+    // Unwrap try openIt() → still see the call
+    if (node.type === "try_expression") {
+      for (const child of namedChildren(node)) walk(child);
       return;
     }
 

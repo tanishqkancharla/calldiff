@@ -85,6 +85,46 @@ function collectStatements(
     steps.push({ type: "call", key });
   };
 
+  const pushIfChain = (node: SyntaxNode, asElseIf: boolean): void => {
+    const kids = namedChildren(node);
+    const blocks = kids.filter((c) => c.type === "block");
+    const nestedIf = kids.find((c) => c.type === "if_expression") ?? null;
+    const cond =
+      childByType(node, "parenthesized_expression") ??
+      kids.find(
+        (c) => c.type !== "block" && c.type !== "if_expression",
+      ) ??
+      null;
+    const condInner =
+      cond?.type === "parenthesized_expression"
+        ? (cond.namedChild(0) ?? cond)
+        : cond;
+    const condText = condInner ? collapseWs(condInner.text) : "";
+    const kind = asElseIf ? "else-if" : "if";
+    const labelKind = asElseIf ? "else if" : "if";
+
+    steps.push({
+      type: "branch",
+      key: condText ? `${kind}:${condText}` : kind,
+      label: condText ? `${labelKind} (${condText})` : labelKind,
+      children: collectStatements(statementsOf(blocks[0] ?? null), typeName),
+    });
+
+    if (nestedIf) {
+      pushIfChain(nestedIf, true);
+      return;
+    }
+
+    if (blocks[1]) {
+      steps.push({
+        type: "branch",
+        key: "else",
+        label: "else",
+        children: collectStatements(statementsOf(blocks[1]), typeName),
+      });
+    }
+  };
+
   const walk = (node: SyntaxNode): void => {
     if (
       node.type === "function_definition" ||
@@ -97,32 +137,77 @@ function collectStatements(
     }
 
     if (node.type === "if_expression") {
-      const kids = namedChildren(node);
-      const blocks = kids.filter((c) => c.type === "block");
-      const cond =
-        childByType(node, "parenthesized_expression") ??
-        kids.find((c) => c.type !== "block") ??
-        null;
-      const condInner =
-        cond?.type === "parenthesized_expression"
-          ? (cond.namedChild(0) ?? cond)
-          : cond;
-      const condText = condInner ? collapseWs(condInner.text) : "";
+      pushIfChain(node, false);
+      return;
+    }
+
+    if (node.type === "try_expression") {
+      const tryBlock = childByType(node, "block");
       steps.push({
         type: "branch",
-        key: condText ? `if:${condText}` : "if",
-        label: condText ? `if (${condText})` : "if",
-        children: collectStatements(
-          statementsOf(blocks[0] ?? null),
-          typeName,
-        ),
+        key: "try",
+        label: "try",
+        children: collectStatements(statementsOf(tryBlock), typeName),
       });
-      if (blocks[1]) {
+      for (const clause of namedChildren(node)) {
+        if (clause.type === "catch_clause") {
+          const caseBlock = childByType(clause, "case_block");
+          const cases = caseBlock ? namedChildren(caseBlock) : [];
+          if (cases.length === 0) {
+            steps.push({
+              type: "branch",
+              key: "catch",
+              label: "catch",
+              children: collectStatements(namedChildren(clause), typeName),
+            });
+          } else {
+            for (const c of cases) {
+              if (c.type !== "case_clause") continue;
+              const pattern =
+                namedChildren(c).find(
+                  (x) =>
+                    x.type !== "block" &&
+                    x.type !== "call_expression" &&
+                    x.type !== "infix_expression",
+                ) ?? namedChildren(c)[0] ?? null;
+              const text = pattern ? collapseWs(pattern.text) : "";
+              const bodyNodes = namedChildren(c).slice(1);
+              steps.push({
+                type: "branch",
+                key: text ? `catch:${text}` : "catch",
+                label: text ? `catch ${text}` : "catch",
+                children: collectStatements(bodyNodes, typeName),
+              });
+            }
+          }
+        }
+        if (clause.type === "finally_clause") {
+          const body =
+            childByType(clause, "block") ?? clause.namedChild(0) ?? null;
+          steps.push({
+            type: "branch",
+            key: "finally",
+            label: "finally",
+            children: collectStatements(statementsOf(body), typeName),
+          });
+        }
+      }
+      return;
+    }
+
+    if (node.type === "match_expression") {
+      const caseBlock = childByType(node, "case_block");
+      for (const clause of caseBlock ? namedChildren(caseBlock) : []) {
+        if (clause.type !== "case_clause") continue;
+        const kids = namedChildren(clause);
+        const pattern = kids[0] ?? null;
+        const text = pattern ? collapseWs(pattern.text) : "";
+        const bodyNodes = kids.slice(1);
         steps.push({
           type: "branch",
-          key: "else",
-          label: "else",
-          children: collectStatements(statementsOf(blocks[1]), typeName),
+          key: text ? `case:${text}` : "case",
+          label: text ? `case ${text}` : "case",
+          children: collectStatements(bodyNodes, typeName),
         });
       }
       return;
@@ -170,17 +255,19 @@ function handleFunction(
         c.type !== "parameters" &&
         c.type !== "type_identifier" &&
         c.type !== "modifiers" &&
-        c.type !== "access_modifier",
+        c.type !== "access_modifier" &&
+        c.type !== "singleton_type",
     ) ??
     null;
 
   const key = typeName ? `${typeName}.${name}` : name;
   const exported = !isPrivate(node);
+  const steps = collectStatements(statementsOf(body), typeName);
   functions.push({
     key,
     label: `${key}${getParamsLabel(params)}`,
     file,
-    steps: collectStatements(statementsOf(body), typeName),
+    steps,
     exported,
     start: node.startIndex,
     end: node.endIndex,
@@ -192,7 +279,20 @@ function handleFunction(
       key: `new ${typeName}`,
       label: `${typeName}${getParamsLabel(params)}`,
       file,
-      steps: collectStatements(statementsOf(body), typeName),
+      steps,
+      exported,
+      start: node.startIndex,
+      end: node.endIndex,
+    });
+  }
+
+  // class Foo { def this(...) } → secondary constructor alias
+  if (typeName && name === "this") {
+    functions.push({
+      key: `new ${typeName}`,
+      label: `${typeName}${getParamsLabel(params)}`,
+      file,
+      steps,
       exported,
       start: node.startIndex,
       end: node.endIndex,

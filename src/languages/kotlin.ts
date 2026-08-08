@@ -69,7 +69,7 @@ function statementsOf(body: SyntaxNode | null): SyntaxNode[] {
   if (body.type === "function_body" || body.type === "control_structure_body") {
     const stmts = childByType(body, "statements");
     if (stmts) return namedChildren(stmts);
-    // empty `{}` body
+    // empty `{}` body — or a bare nested if_expression
     return namedChildren(body).filter((c) => c.type !== "statements");
   }
   if (body.type === "statements") return namedChildren(body);
@@ -90,6 +90,38 @@ function collectStatements(
     steps.push({ type: "call", key });
   };
 
+  const pushIfChain = (node: SyntaxNode, asElseIf: boolean): void => {
+    const kids = namedChildren(node);
+    const bodies = kids.filter((c) => c.type === "control_structure_body");
+    const cond =
+      kids.find((c) => c.type !== "control_structure_body") ?? null;
+    const condText = cond ? collapseWs(cond.text) : "";
+    const kind = asElseIf ? "else-if" : "if";
+    const labelKind = asElseIf ? "else if" : "if";
+
+    steps.push({
+      type: "branch",
+      key: condText ? `${kind}:${condText}` : kind,
+      label: condText ? `${labelKind} ${condText}` : labelKind,
+      children: collectStatements(statementsOf(bodies[0] ?? null), className),
+    });
+
+    if (!bodies[1]) return;
+
+    const elseStmts = statementsOf(bodies[1]);
+    if (elseStmts.length === 1 && elseStmts[0]!.type === "if_expression") {
+      pushIfChain(elseStmts[0]!, true);
+      return;
+    }
+
+    steps.push({
+      type: "branch",
+      key: "else",
+      label: "else",
+      children: collectStatements(elseStmts, className),
+    });
+  };
+
   const walk = (node: SyntaxNode): void => {
     if (
       node.type === "function_declaration" ||
@@ -98,30 +130,83 @@ function collectStatements(
       node.type === "companion_object" ||
       node.type === "anonymous_function" ||
       node.type === "lambda_literal" ||
-      node.type === "secondary_constructor"
+      node.type === "secondary_constructor" ||
+      node.type === "anonymous_initializer"
     ) {
       return;
     }
 
     if (node.type === "if_expression") {
-      const kids = namedChildren(node);
-      const bodies = kids.filter((c) => c.type === "control_structure_body");
-      const cond =
-        kids.find((c) => c.type !== "control_structure_body") ?? null;
-      const condText = cond ? collapseWs(cond.text) : "";
+      pushIfChain(node, false);
+      return;
+    }
+
+    if (node.type === "try_expression") {
+      const tryStmts = childByType(node, "statements");
       steps.push({
         type: "branch",
-        key: condText ? `if:${condText}` : "if",
-        label: condText ? `if ${condText}` : "if",
-        children: collectStatements(statementsOf(bodies[0] ?? null), className),
+        key: "try",
+        label: "try",
+        children: tryStmts
+          ? collectStatements(namedChildren(tryStmts), className)
+          : [],
       });
-      if (bodies[1]) {
-        steps.push({
-          type: "branch",
-          key: "else",
-          label: "else",
-          children: collectStatements(statementsOf(bodies[1]), className),
-        });
+      for (const clause of namedChildren(node)) {
+        if (clause.type === "catch_block") {
+          const type =
+            childByType(clause, "user_type") ??
+            namedChildren(clause).find(
+              (c) =>
+                c.type !== "simple_identifier" && c.type !== "statements",
+            ) ??
+            null;
+          const text = type ? collapseWs(type.text) : "";
+          const body = childByType(clause, "statements");
+          steps.push({
+            type: "branch",
+            key: text ? `catch:${text}` : "catch",
+            label: text ? `catch ${text}` : "catch",
+            children: body
+              ? collectStatements(namedChildren(body), className)
+              : [],
+          });
+        }
+        if (clause.type === "finally_block") {
+          const body = childByType(clause, "statements");
+          steps.push({
+            type: "branch",
+            key: "finally",
+            label: "finally",
+            children: body
+              ? collectStatements(namedChildren(body), className)
+              : [],
+          });
+        }
+      }
+      return;
+    }
+
+    if (node.type === "when_expression") {
+      for (const entry of namedChildren(node)) {
+        if (entry.type !== "when_entry") continue;
+        const cond = childByType(entry, "when_condition");
+        const body = childByType(entry, "control_structure_body");
+        if (cond) {
+          const text = collapseWs(cond.text);
+          steps.push({
+            type: "branch",
+            key: text ? `case:${text}` : "case",
+            label: text ? `case ${text}` : "case",
+            children: collectStatements(statementsOf(body), className),
+          });
+        } else {
+          steps.push({
+            type: "branch",
+            key: "else",
+            label: "else",
+            children: collectStatements(statementsOf(body), className),
+          });
+        }
       }
       return;
     }
@@ -186,6 +271,26 @@ function handleSecondaryConstructor(
   functions.push({ ...info, key: `new ${className}` });
 }
 
+function handleInitBlock(
+  file: string,
+  node: SyntaxNode,
+  className: string,
+  functions: FunctionInfo[],
+) {
+  const stmts = childByType(node, "statements");
+  const info: FunctionInfo = {
+    key: `${className}.init`,
+    label: `${className}()`,
+    file,
+    steps: collectStatements(stmts ? namedChildren(stmts) : [], className),
+    exported: true,
+    start: node.startIndex,
+    end: node.endIndex,
+  };
+  functions.push(info);
+  functions.push({ ...info, key: `new ${className}` });
+}
+
 function handleClass(
   file: string,
   node: SyntaxNode,
@@ -201,6 +306,8 @@ function handleClass(
       handleFunction(file, element, className, functions);
     } else if (element.type === "secondary_constructor") {
       handleSecondaryConstructor(file, element, className, functions);
+    } else if (element.type === "anonymous_initializer") {
+      handleInitBlock(file, element, className, functions);
     } else if (element.type === "class_declaration") {
       handleClass(file, element, functions);
     } else if (
