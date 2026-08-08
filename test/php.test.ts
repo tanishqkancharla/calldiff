@@ -78,3 +78,166 @@ test("php: \$this->method resolves to Class.method", ({ expectCallstack }) => {
       └─ Runner.run()
   `);
 });
+
+test("php: new Class expands through __construct", ({ expectCallstack }) => {
+  expectCallstack(
+    `
+      <?php
+      function make() {
+          new Thing();
+      }
+      class Thing {
+          public function __construct() {
+              init();
+    +         ready();
+          }
+      }
+      function init() {}
+    + function ready() {}
+    `,
+    "make",
+    { file: "ctor.php" },
+  ).toEqual(`
+      make()
+      └─ new Thing()
+         ├─ init()
+    +    └─ ready()
+  `);
+});
+
+test("php: does not attribute nested closure/arrow bodies", ({
+  expectCallstack,
+}) => {
+  expectCallstack(
+    `
+      <?php
+      function outer() {
+          \$f = function() { hidden(); };
+          \$g = fn() => also_hidden();
+          visible();
+    +     also_visible();
+      }
+      function hidden() {}
+      function also_hidden() {}
+      function visible() {}
+    + function also_visible() {}
+    `,
+    "outer",
+    { file: "nested.php" },
+  ).toEqual(`
+      outer()
+      ├─ visible()
+    + └─ also_visible()
+  `);
+});
+
+test("php: elseif chains", ({ expectCallstack }) => {
+  expectCallstack(
+    `
+      <?php
+      function handle(\$status) {
+          if (\$status == 1) {
+              do_a();
+          } elseif (\$status == 2) {
+              do_b();
+    +         do_extra();
+          } else {
+              do_other();
+          }
+      }
+      function do_a() {}
+      function do_b() {}
+    + function do_extra() {}
+      function do_other() {}
+    `,
+    "handle",
+    { file: "elif.php" },
+  ).toEqual(`
+      handle(status)
+      ├─ if \$status == 1
+         └─ do_a()
+      ├─ elseif \$status == 2
+         ├─ do_b()
+    +    └─ do_extra()
+      └─ else
+         └─ do_other()
+  `);
+});
+
+test("php: try/catch/finally as branches", ({ expectCallstack }) => {
+  expectCallstack(
+    `
+      <?php
+      function boot() {
+          try {
+              open_();
+          } catch (Exception \$e) {
+              recover();
+          } finally {
+              close_();
+          }
+    +     flush();
+      }
+      function open_() {}
+      function recover() {}
+      function close_() {}
+    + function flush() {}
+    `,
+    "boot",
+    { file: "try.php" },
+  ).toEqual(`
+      boot()
+      ├─ try
+         └─ open_()
+      ├─ catch Exception
+         └─ recover()
+      ├─ finally
+         └─ close_()
+    + └─ flush()
+  `);
+});
+
+test("php: self/parent and private methods", ({ expectCallstack }) => {
+  expectCallstack(
+    `
+      <?php
+      class Child {
+          public function start() {
+              self::helper();
+              parent::setup();
+              \$this->secret();
+    +         self::extra();
+          }
+          public static function helper() {
+              work();
+    +         more();
+          }
+    +     public static function extra() {
+    +         also();
+    +     }
+          private function secret() {
+              hidden();
+    +         audit();
+          }
+      }
+      function work() {}
+    + function more() {}
+    + function also() {}
+      function hidden() {}
+    + function audit() {}
+    `,
+    "Child.start",
+    { file: "scope.php" },
+  ).toEqual(`
+      Child.start()
+      ├─ Child.helper()
+      │  ├─ work()
+    + │  └─ more()
+      ├─ Child.setup()
+      ├─ Child.secret()
+      │  ├─ hidden()
+    + │  └─ audit()
+    + └─ Child.extra()
+    +    └─ also()
+  `);
+});

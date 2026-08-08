@@ -167,6 +167,38 @@ function collectStatements(statements: SyntaxNode[]): CallStep[] {
       return;
     }
 
+    if (node.type === "switch_statement") {
+      const body =
+        node.childForFieldName("body") ??
+        childByType(node, "compound_statement");
+      if (body) {
+        for (const clause of namedChildren(body)) {
+          if (clause.type !== "case_statement") continue;
+          const value = clause.childForFieldName("value");
+          const kids = namedChildren(clause).filter(
+            (c) => c !== value && c.type !== "break_statement",
+          );
+          if (value) {
+            const text = collapseWs(value.text);
+            steps.push({
+              type: "branch",
+              key: `case:${text}`,
+              label: `case ${text}`,
+              children: collectStatements(kids),
+            });
+          } else {
+            steps.push({
+              type: "branch",
+              key: "default",
+              label: "default",
+              children: collectStatements(kids),
+            });
+          }
+        }
+      }
+      return;
+    }
+
     if (node.type === "call_expression") {
       const callee = node.namedChild(0);
       if (callee) {

@@ -159,6 +159,95 @@ function collectStatements(
       return;
     }
 
+    if (node.type === "try_statement") {
+      const body =
+        node.childForFieldName("body") ?? childByType(node, "block");
+      steps.push({
+        type: "branch",
+        key: "try",
+        label: "try",
+        children: body
+          ? collectStatements(namedChildren(body), className)
+          : [],
+      });
+      for (const clause of namedChildren(node)) {
+        if (clause.type === "catch_clause") {
+          const decl = childByType(clause, "catch_declaration");
+          const text = decl ? collapseWs(decl.text) : "";
+          const catchBody =
+            clause.childForFieldName("body") ?? childByType(clause, "block");
+          steps.push({
+            type: "branch",
+            key: text ? `catch:${text}` : "catch",
+            label: text ? `catch ${text}` : "catch",
+            children: catchBody
+              ? collectStatements(namedChildren(catchBody), className)
+              : [],
+          });
+        }
+        if (clause.type === "finally_clause") {
+          const finallyBody =
+            clause.childForFieldName("body") ?? childByType(clause, "block");
+          steps.push({
+            type: "branch",
+            key: "finally",
+            label: "finally",
+            children: finallyBody
+              ? collectStatements(namedChildren(finallyBody), className)
+              : [],
+          });
+        }
+      }
+      return;
+    }
+
+    if (node.type === "switch_statement") {
+      const body =
+        node.childForFieldName("body") ?? childByType(node, "switch_body");
+      if (body) {
+        for (const section of namedChildren(body)) {
+          if (section.type !== "switch_section") continue;
+          const pattern =
+            namedChildren(section).find(
+              (c) =>
+                c.type === "constant_pattern" ||
+                c.type === "declaration_pattern" ||
+                c.type === "var_pattern" ||
+                c.type === "discard_pattern",
+            ) ?? null;
+          const isDefault = [...Array(section.childCount)]
+            .map((_, i) => section.child(i))
+            .some((c) => c?.type === "default" || c?.text === "default");
+          const stmts = namedChildren(section).filter(
+            (c) =>
+              c !== pattern &&
+              c.type !== "break_statement" &&
+              c.type !== "constant_pattern" &&
+              c.type !== "declaration_pattern" &&
+              c.type !== "var_pattern" &&
+              c.type !== "discard_pattern",
+          );
+          if (isDefault && !pattern) {
+            steps.push({
+              type: "branch",
+              key: "default",
+              label: "default",
+              children: collectStatements(stmts, className),
+            });
+          } else {
+            const text = pattern ? collapseWs(pattern.text) : "";
+            steps.push({
+              type: "branch",
+              key: text ? `case:${text}` : "case",
+              label: text ? `case ${text}` : "case",
+              children: collectStatements(stmts, className),
+            });
+          }
+        }
+      }
+      return;
+    }
+
     if (node.type === "invocation_expression") {
       const callee = node.namedChild(0);
       if (callee) {

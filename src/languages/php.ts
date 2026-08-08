@@ -121,7 +121,10 @@ function collectStatements(
         node.childForFieldName("body") ??
         node.childForFieldName("consequence") ??
         namedChildren(node).find(
-          (c) => c.type !== "parenthesized_expression" && c.type !== "else_clause",
+          (c) =>
+            c.type !== "parenthesized_expression" &&
+            c.type !== "else_clause" &&
+            c.type !== "else_if_clause",
         ) ??
         null;
       const text = condText(cond);
@@ -139,24 +142,16 @@ function collectStatements(
           : [],
       });
 
-      let elseClause = childByType(node, "else_clause");
-      while (elseClause) {
-        const inner =
-          childByType(elseClause, "if_statement") ??
-          elseClause.namedChild(0);
-        if (!inner) break;
-        if (inner.type === "if_statement") {
+      for (const child of namedChildren(node)) {
+        if (child.type === "else_if_clause") {
           const elifCond =
-            inner.childForFieldName("condition") ??
-            childByType(inner, "parenthesized_expression");
+            child.childForFieldName("condition") ??
+            childByType(child, "parenthesized_expression");
           const elifText = condText(elifCond);
           const elifCons =
-            inner.childForFieldName("body") ??
-            inner.childForFieldName("consequence") ??
-            namedChildren(inner).find(
-              (c) =>
-                c.type !== "parenthesized_expression" &&
-                c.type !== "else_clause",
+            child.childForFieldName("body") ??
+            namedChildren(child).find(
+              (c) => c.type !== "parenthesized_expression",
             ) ??
             null;
           steps.push({
@@ -172,21 +167,136 @@ function collectStatements(
                 )
               : [],
           });
-          elseClause = childByType(inner, "else_clause");
           continue;
         }
-        steps.push({
-          type: "branch",
-          key: "else",
-          label: "else",
-          children: collectStatements(
-            inner.type === "compound_statement"
-              ? namedChildren(inner)
-              : [inner],
-            className,
-          ),
-        });
-        break;
+        if (child.type !== "else_clause") continue;
+
+        let elseClause: SyntaxNode | null = child;
+        while (elseClause) {
+          const inner =
+            childByType(elseClause, "if_statement") ??
+            elseClause.namedChild(0);
+          if (!inner) break;
+          if (inner.type === "if_statement") {
+            const elifCond =
+              inner.childForFieldName("condition") ??
+              childByType(inner, "parenthesized_expression");
+            const elifText = condText(elifCond);
+            const elifCons =
+              inner.childForFieldName("body") ??
+              inner.childForFieldName("consequence") ??
+              namedChildren(inner).find(
+                (c) =>
+                  c.type !== "parenthesized_expression" &&
+                  c.type !== "else_clause" &&
+                  c.type !== "else_if_clause",
+              ) ??
+              null;
+            steps.push({
+              type: "branch",
+              key: elifText ? `else-if:${elifText}` : "else-if",
+              label: elifText ? `elseif ${elifText}` : "elseif",
+              children: elifCons
+                ? collectStatements(
+                    elifCons.type === "compound_statement"
+                      ? namedChildren(elifCons)
+                      : [elifCons],
+                    className,
+                  )
+                : [],
+            });
+            // Nested if may have else_if_clause siblings too
+            for (const nested of namedChildren(inner)) {
+              if (nested.type === "else_if_clause") {
+                const nCond =
+                  nested.childForFieldName("condition") ??
+                  childByType(nested, "parenthesized_expression");
+                const nText = condText(nCond);
+                const nBody =
+                  nested.childForFieldName("body") ??
+                  namedChildren(nested).find(
+                    (c) => c.type !== "parenthesized_expression",
+                  ) ??
+                  null;
+                steps.push({
+                  type: "branch",
+                  key: nText ? `else-if:${nText}` : "else-if",
+                  label: nText ? `elseif ${nText}` : "elseif",
+                  children: nBody
+                    ? collectStatements(
+                        nBody.type === "compound_statement"
+                          ? namedChildren(nBody)
+                          : [nBody],
+                        className,
+                      )
+                    : [],
+                });
+              }
+            }
+            elseClause = childByType(inner, "else_clause");
+            continue;
+          }
+          steps.push({
+            type: "branch",
+            key: "else",
+            label: "else",
+            children: collectStatements(
+              inner.type === "compound_statement"
+                ? namedChildren(inner)
+                : [inner],
+              className,
+            ),
+          });
+          break;
+        }
+      }
+      return;
+    }
+
+    if (node.type === "try_statement") {
+      const body =
+        node.childForFieldName("body") ??
+        childByType(node, "compound_statement");
+      steps.push({
+        type: "branch",
+        key: "try",
+        label: "try",
+        children: body
+          ? collectStatements(namedChildren(body), className)
+          : [],
+      });
+      for (const clause of namedChildren(node)) {
+        if (clause.type === "catch_clause") {
+          const types =
+            childByType(clause, "type_list") ??
+            namedChildren(clause).find((c) => c.type === "type_list") ??
+            null;
+          const text = types ? collapseWs(types.text) : "";
+          const catchBody =
+            clause.childForFieldName("body") ??
+            childByType(clause, "compound_statement");
+          steps.push({
+            type: "branch",
+            key: text ? `catch:${text}` : "catch",
+            label: text ? `catch ${text}` : "catch",
+            children: catchBody
+              ? collectStatements(namedChildren(catchBody), className)
+              : [],
+          });
+        }
+        if (clause.type === "finally_clause") {
+          const finallyBody =
+            clause.childForFieldName("body") ??
+            childByType(clause, "compound_statement");
+          steps.push({
+            type: "branch",
+            key: "finally",
+            label: "finally",
+            children: finallyBody
+              ? collectStatements(namedChildren(finallyBody), className)
+              : [],
+          });
+        }
       }
       return;
     }

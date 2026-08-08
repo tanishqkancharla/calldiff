@@ -52,8 +52,8 @@ function calleeKey(node: SyntaxNode, className: string | null): string | null {
     return node.text;
   }
   if (node.type === "qualified_identifier") {
-    // std::foo / Foo::bar — use full text collapsed
-    return collapseWs(node.text).replace(/\s+/g, "");
+    // std::foo / Foo::bar — normalize :: to . for Class.method keys
+    return collapseWs(node.text).replace(/\s+/g, "").replace(/::/g, ".");
   }
   if (node.type === "field_expression") {
     const object = node.namedChild(0);
@@ -165,6 +165,37 @@ function collectStatements(
           children: collectStatements([inner], className),
         });
         break;
+      }
+      return;
+    }
+
+    if (node.type === "try_statement") {
+      const body =
+        node.childForFieldName("body") ??
+        childByType(node, "compound_statement");
+      steps.push({
+        type: "branch",
+        key: "try",
+        label: "try",
+        children: body
+          ? collectStatements(namedChildren(body), className)
+          : [],
+      });
+      for (const clause of namedChildren(node)) {
+        if (clause.type !== "catch_clause") continue;
+        const params = childByType(clause, "parameter_list");
+        const text = params ? collapseWs(params.text) : "";
+        const catchBody =
+          clause.childForFieldName("body") ??
+          childByType(clause, "compound_statement");
+        steps.push({
+          type: "branch",
+          key: text ? `catch:${text}` : "catch",
+          label: text ? `catch ${text}` : "catch",
+          children: catchBody
+            ? collectStatements(namedChildren(catchBody), className)
+            : [],
+        });
       }
       return;
     }
