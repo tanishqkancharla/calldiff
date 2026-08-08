@@ -1,6 +1,26 @@
 import { parseSync } from "oxc-parser";
 import type { Node } from "@oxc-project/types";
-import type { CallStep, FunctionInfo } from "./types.js";
+import type { CallStep, FunctionInfo, SourceRef } from "./types.js";
+
+/** Offset → 1-based line, via a precomputed line-start table per file. */
+type LineOf = (offset: number) => number;
+
+function makeLineOf(source: string): LineOf {
+  const starts: number[] = [0];
+  for (let i = 0; i < source.length; i++) {
+    if (source.charCodeAt(i) === 10) starts.push(i + 1);
+  }
+  return (offset) => {
+    let lo = 0;
+    let hi = starts.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (starts[mid]! <= offset) lo = mid;
+      else hi = mid - 1;
+    }
+    return lo + 1;
+  };
+}
 
 type AnyNode = Node & Record<string, unknown>;
 
@@ -124,31 +144,43 @@ function statementsOf(node: AnyNode): unknown[] {
   return [node];
 }
 
+interface StepContext {
+  file: string;
+  lineOf: LineOf;
+}
+
 function collectStepsFromBody(
   source: string,
   body: AnyNode | null | undefined,
   className: string | null,
+  ctx: StepContext,
 ): CallStep[] {
   if (!body) return [];
   if (body.type === "BlockStatement" && Array.isArray(body.body)) {
-    return collectStatements(source, body.body as unknown[], className);
+    return collectStatements(source, body.body as unknown[], className, ctx);
   }
-  return collectStatements(source, [body], className);
+  return collectStatements(source, [body], className, ctx);
 }
 
 function collectStatements(
   source: string,
   statements: unknown[],
   className: string | null,
+  ctx: StepContext,
 ): CallStep[] {
   const steps: CallStep[] = [];
   const seenCalls = new Set<string>();
+
+  const siteAt = (start: unknown): SourceRef | undefined =>
+    typeof start === "number"
+      ? { file: ctx.file, line: ctx.lineOf(start) }
+      : undefined;
 
   const addCall = (key: string, start: unknown) => {
     const mark = `${key}:${String(start)}`;
     if (seenCalls.has(mark)) return;
     seenCalls.add(mark);
-    steps.push({ type: "call", key });
+    steps.push({ type: "call", key, site: siteAt(start) });
   };
 
   const walkExpr = (node: unknown): void => {
@@ -176,8 +208,9 @@ function collectStatements(
         type: "branch",
         key: branchKey("if", cond),
         label: ifOpenLabel(source, node),
+        site: siteAt(node.start),
         children: consequent
-          ? collectStatements(source, statementsOf(consequent), className)
+          ? collectStatements(source, statementsOf(consequent), className, ctx)
           : [],
       });
 
@@ -197,11 +230,13 @@ function collectStatements(
             type: "branch",
             key: branchKey("else-if", elseCond),
             label: elseOpenLabel(source, prevConsequent, current),
+            site: siteAt(current.start),
             children: nextConsequent
               ? collectStatements(
                   source,
                   statementsOf(nextConsequent),
                   className,
+                  ctx,
                 )
               : [],
           });
@@ -215,10 +250,12 @@ function collectStatements(
           type: "branch",
           key: branchKey("else", ""),
           label: elseOpenLabel(source, prevConsequent, current),
+          site: siteAt(current.start),
           children: collectStatements(
             source,
             statementsOf(current),
             className,
+            ctx,
           ),
         });
         break;
@@ -263,16 +300,18 @@ function functionFromNode(
   start: number,
   end: number,
   className: string | null,
+  ctx: StepContext,
 ): FunctionInfo {
   const paramsLabel = getParamsLabel(params);
   return {
     key,
     label: `${label}${paramsLabel}`,
     file,
-    steps: collectStepsFromBody(source, body, className),
+    steps: collectStepsFromBody(source, body, className, ctx),
     exported,
     start,
     end,
+    startLine: ctx.lineOf(start),
   };
 }
 
@@ -282,6 +321,7 @@ function extractFromProgram(
   program: AnyNode,
 ): FunctionInfo[] {
   const functions: FunctionInfo[] = [];
+  const ctx: StepContext = { file, lineOf: makeLineOf(source) };
 
   const handleFunction = (
     node: AnyNode,
@@ -303,6 +343,7 @@ function extractFromProgram(
         Number(node.start ?? 0),
         Number(node.end ?? 0),
         className,
+        ctx,
       ),
     );
   };
@@ -348,6 +389,7 @@ function extractFromProgram(
             Number(element.start ?? 0),
             Number(element.end ?? 0),
             className,
+            ctx,
           ),
         );
       }
@@ -375,6 +417,7 @@ function extractFromProgram(
               Number(element.start ?? 0),
               Number(element.end ?? 0),
               className,
+              ctx,
             ),
           );
         }

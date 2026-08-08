@@ -26,6 +26,8 @@ function prefix(status: DiffStatus): string {
 export interface RenderOptions {
   /** When false, skip ANSI colors (useful for tests). Default: true */
   color?: boolean;
+  /** Append " — file:line" to rows that carry a source anchor. */
+  locations?: boolean;
 }
 
 /**
@@ -63,7 +65,13 @@ export function renderDiff(
     isRoot: boolean,
   ) => {
     const branch = isRoot ? "" : isLast ? "└─ " : "├─ ";
-    const line = `${statusPrefix(node.status)} ${indent}${branch}${paintStatus(node.status, node.label)}`;
+    const site =
+      options.locations && node.site
+        ? useColor
+          ? pc.dim(`  ${node.site.file}:${node.site.line}`)
+          : `  ${node.site.file}:${node.site.line}`
+        : "";
+    const line = `${statusPrefix(node.status)} ${indent}${branch}${paintStatus(node.status, node.label)}${site}`;
     lines.push(line);
 
     // Conditional arms omit the continuing │ rail — they are alternate paths,

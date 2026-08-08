@@ -23,6 +23,8 @@ export function parseArgs(argv: string[], cwd = process.cwd()): CliOptions {
     cwd,
     maxDepth: 12,
     help: false,
+    json: false,
+    locations: false,
   };
 
   const positionals: string[] = [];
@@ -60,6 +62,18 @@ export function parseArgs(argv: string[], cwd = process.cwd()): CliOptions {
       const [value, next] = takeValue(argv, i, arg);
       options.entries.push(value);
       i = next + 1;
+      continue;
+    }
+
+    if (arg === "--json") {
+      options.json = true;
+      i += 1;
+      continue;
+    }
+
+    if (arg === "--locations" || arg === "-l") {
+      options.locations = true;
+      i += 1;
       continue;
     }
 
@@ -125,6 +139,8 @@ Options:
   -e, --entry <name> Entrypoint(s): functionName or ClassName.method
                      If omitted, infer exported functions whose call trees changed
   --max-depth <n>    Max call-tree depth (default: 12)
+  -l, --locations    Append file:line to each row
+  --json             Emit diff trees as JSON with source anchors
   -h, --help         Show help
 
 Labels:

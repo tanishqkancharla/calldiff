@@ -67,8 +67,34 @@ export async function run(argv: string[]): Promise<number> {
   }
 
   if (entries.length === 0) {
+    if (options.json) {
+      console.log(
+        JSON.stringify(
+          { from: describeSnapshot(from), to: describeSnapshot(to), trees: [] },
+          null,
+          2,
+        ),
+      );
+      return 0;
+    }
     console.log(
       `No callstack changes between ${describeSnapshot(from)} and ${describeSnapshot(to)}.`,
+    );
+    return 0;
+  }
+
+  if (options.json) {
+    const trees = [];
+    for (const entry of entries) {
+      const diff = diffEntry(entry, before, after, options.maxDepth);
+      if (diff) trees.push({ entry, tree: diff });
+    }
+    console.log(
+      JSON.stringify(
+        { from: describeSnapshot(from), to: describeSnapshot(to), trees },
+        null,
+        2,
+      ),
     );
     return 0;
   }
@@ -82,7 +108,7 @@ export async function run(argv: string[]): Promise<number> {
     const diff = diffEntry(entry, before, after, options.maxDepth);
     if (!diff) continue;
     if (printed > 0) console.log("");
-    console.log(renderDiff(diff));
+    console.log(renderDiff(diff, { locations: options.locations }));
     printed += 1;
   }
 

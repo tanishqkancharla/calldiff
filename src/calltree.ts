@@ -20,6 +20,7 @@ function expandSteps(
         key: step.key,
         label: step.label,
         kind: "branch" as const,
+        site: step.site,
         children: expandSteps(
           step.children,
           index,
@@ -29,7 +30,10 @@ function expandSteps(
         ),
       };
     }
-    return expandCall(step.key, index, depth, maxDepth, visiting);
+    const node = expandCall(step.key, index, depth, maxDepth, visiting);
+    // The step knows where the call is written (the caller's file); that
+    // site beats the callee's definition as a diff anchor.
+    return step.site ? { ...node, site: step.site } : node;
   });
 }
 
@@ -77,7 +81,13 @@ export function buildCallTree(
   maxDepth: number,
 ): CallNode {
   const resolved = resolveEntry(entryKey, index) ?? entryKey;
-  return expandCall(resolved, index, 0, maxDepth, new Set());
+  const tree = expandCall(resolved, index, 0, maxDepth, new Set());
+  // The root has no call site — anchor it at its definition.
+  const info = index.get(resolved);
+  if (!tree.site && info) {
+    tree.site = { file: info.file, line: info.startLine };
+  }
+  return tree;
 }
 
 export function resolveEntry(

@@ -40,6 +40,12 @@ calldiff main feature -e PiService.createAgentSession -e boot
 
 # limit to paths
 calldiff main feature -- src/lib
+
+# append file:line anchors to each row
+calldiff -l
+
+# machine-readable diff trees with source anchors
+calldiff --json
 ```
 
 ### Semantics (git-diff shaped)
@@ -52,6 +58,11 @@ calldiff main feature -- src/lib
 
 `-` lines were present in **from** and gone in **to**.  
 `+` lines are new in **to**.
+
+Every node carries a source anchor (`site: { file, line }` in `--json`,
+shown by `-l`): the line where the call/branch is written in its caller,
+or the definition line for tree roots. `-` rows anchor into the **from**
+snapshot's coordinates; all other rows into **to**.
 
 ### Labels
 
