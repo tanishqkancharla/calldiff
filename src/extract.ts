@@ -1,6 +1,5 @@
 /**
- * Prototype: tree-sitter-based extractor (same FunctionInfo contract as oxc extract.ts).
- * Used to measure parity against existing tests.
+ * Extract callables and call steps from TypeScript/TSX via tree-sitter.
  */
 import Parser from "tree-sitter";
 import TypeScript from "tree-sitter-typescript";
@@ -343,16 +342,6 @@ function handleClass(
       if (!methodName) continue;
 
       const accessibility = childByType(element, "accessibility_modifier");
-      const isPublic =
-        exported || accessibility?.text === "public" || !accessibility;
-
-      // Match oxc: exported || accessibility === "public"
-      // oxc only treats explicit "public" as extra; private/protected stay non-exported
-      // unless the class itself is exported... Looking at oxc again:
-      // `exported || element.accessibility === "public"`
-      // So if class is exported, ALL methods are marked exported.
-      // If class not exported, only methods with accessibility === "public".
-      // Methods with no accessibility: exported is just the class exported flag.
       const methodExported =
         exported || accessibility?.text === "public";
 
@@ -363,7 +352,6 @@ function handleClass(
         : `${className}.${methodName}`;
       const label = isConstructor ? `new ${className}()` : key;
 
-      void isPublic; // silence — oxc semantics use methodExported only
       functions.push(
         functionFromParts(
           file,
@@ -385,11 +373,14 @@ function handleClass(
         childByType(element, "arrow_function") ??
         childByType(element, "function_expression");
       if (keyNode && value) {
-        const methodName = keyNode.text;
-        const key = `${className}.${methodName}`;
-        handleFunctionNode(file, value, methodName, exported, className, functions);
-        // handleFunctionNode uses value's span; fix key already set via name
-        void key;
+        handleFunctionNode(
+          file,
+          value,
+          keyNode.text,
+          exported,
+          className,
+          functions,
+        );
       }
     }
   }

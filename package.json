@@ -14,7 +14,7 @@
     "prepublishOnly": "npm run build",
     "dev": "tsx src/cli.ts",
     "start": "node dist/cli.js",
-    "test": "tsx --test test/**/*.test.ts"
+    "test": "vitest run"
   },
   "engines": {
     "node": ">=20"
@@ -31,22 +31,21 @@
     "callgraph",
     "diff",
     "typescript",
-    "oxc",
+    "tree-sitter",
     "git",
     "callstack"
   ],
   "author": "Tanishq Kancharla",
   "license": "MIT",
   "dependencies": {
-    "oxc-parser": "^0.143.0",
     "picocolors": "^1.1.1",
     "tree-sitter": "^0.21.1",
     "tree-sitter-typescript": "^0.23.2"
   },
   "devDependencies": {
-    "@oxc-project/types": "^0.143.0",
     "@types/node": "^24.2.0",
     "tsx": "^4.20.3",
-    "typescript": "^5.9.2"
+    "typescript": "^5.9.2",
+    "vitest": "^4.1.10"
   }
 }

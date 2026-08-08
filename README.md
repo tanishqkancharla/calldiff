@@ -65,7 +65,7 @@ If you omit `--entry`, calldiff infers exported functions whose expanded call tr
 ## How it works
 
 1. Reads TypeScript from both git trees (`git show` / working tree)
-2. Parses with [oxc-parser](https://oxc.rs/)
+2. Parses with [tree-sitter](https://tree-sitter.github.io/tree-sitter/) (`tree-sitter-typescript`)
 3. Builds per-function callee lists and expands them into call trees
 4. Diffs the trees and prints an ASCII callstack diff
 
