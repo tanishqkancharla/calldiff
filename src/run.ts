@@ -1,4 +1,3 @@
-import { parseArgs, printHelp } from "./args.js";
 import { buildCallTree, resolveEntry } from "./calltree.js";
 import { buildIndex, extractFunctions } from "./extract.js";
 import {
@@ -12,8 +11,34 @@ import {
 } from "./git.js";
 import { diffEntry, inferEntries } from "./infer.js";
 import { renderDiff, renderTree } from "./render.js";
-import type { Snapshot } from "./types.js";
+import type {
+  CallNode,
+  DiffNode,
+  DiffResult,
+  ShowResult,
+  Snapshot,
+} from "./types.js";
 import type { FunctionIndex } from "./extract.js";
+
+export type DiffRunOptions = {
+  from?: string;
+  to?: string;
+  entries?: string[];
+  paths?: string[];
+  cwd?: string;
+  maxDepth?: number;
+  /** When false, skip ANSI colors in ascii output. Default: true */
+  color?: boolean;
+};
+
+export type ShowRunOptions = {
+  ref?: string;
+  entries: string[];
+  paths?: string[];
+  cwd?: string;
+  maxDepth?: number;
+  color?: boolean;
+};
 
 function loadIndex(
   cwd: string,
@@ -47,103 +72,134 @@ function resolveShowEntries(index: FunctionIndex, explicit: string[]): string[] 
   return resolved;
 }
 
-async function runShow(
-  cwd: string,
-  options: ReturnType<typeof parseArgs>,
-): Promise<number> {
-  const snapshot = resolveSnapshot(options.from);
-  if (snapshot.kind === "commit") verifyCommit(cwd, snapshot.ref);
-
-  const index = loadIndex(cwd, snapshot, options.paths);
-
-  let entries: string[];
-  try {
-    entries = resolveShowEntries(index, options.entries);
-  } catch (error) {
-    console.error(error instanceof Error ? error.message : error);
-    return 1;
-  }
-
-  console.log(`calldiff show ${describeSnapshot(snapshot)}\n`);
-
-  let printed = 0;
-  for (const entry of entries) {
-    const tree = buildCallTree(entry, index, options.maxDepth);
-    if (printed > 0) console.log("");
-    console.log(renderTree(tree));
-    printed += 1;
-  }
-
-  return 0;
+function serializeCallNode(node: CallNode): CallNode {
+  return {
+    key: node.key,
+    label: node.label,
+    ...(node.kind ? { kind: node.kind } : {}),
+    children: node.children.map(serializeCallNode),
+  };
 }
 
-async function runDiff(
-  cwd: string,
-  options: ReturnType<typeof parseArgs>,
-): Promise<number> {
+function serializeDiffNode(node: DiffNode): DiffNode {
+  return {
+    key: node.key,
+    label: node.label,
+    status: node.status,
+    ...(node.kind ? { kind: node.kind } : {}),
+    children: node.children.map(serializeDiffNode),
+  };
+}
+
+/** Diff call stacks between two snapshots. Returns structured data + ASCII. */
+export function runDiff(options: DiffRunOptions = {}): DiffResult {
+  const cwd = options.cwd ?? process.cwd();
+  const maxDepth = options.maxDepth ?? 12;
+  const entriesOpt = options.entries ?? [];
+  const paths = options.paths ?? [];
+  const color = options.color !== false;
+
+  assertGitRepo(cwd);
+
   const { from, to } = resolveSnapshots(options.from, options.to);
   if (from.kind === "commit") verifyCommit(cwd, from.ref);
   if (to.kind === "commit") verifyCommit(cwd, to.ref);
 
-  const before = loadIndex(cwd, from, options.paths);
-  const after = loadIndex(cwd, to, options.paths);
+  const before = loadIndex(cwd, from, paths);
+  const after = loadIndex(cwd, to, paths);
 
-  let entries: string[];
-  try {
-    entries = inferEntries(before, after, options.entries, options.maxDepth);
-  } catch (error) {
-    console.error(error instanceof Error ? error.message : error);
-    return 1;
-  }
+  const entries = inferEntries(before, after, entriesOpt, maxDepth);
+
+  const fromLabel = describeSnapshot(from);
+  const toLabel = describeSnapshot(to);
 
   if (entries.length === 0) {
-    console.log(
-      `No callstack changes between ${describeSnapshot(from)} and ${describeSnapshot(to)}.`,
-    );
-    return 0;
+    const message = `No callstack changes between ${fromLabel} and ${toLabel}.`;
+    return {
+      mode: "diff",
+      from: fromLabel,
+      to: toLabel,
+      message,
+      trees: [],
+      ascii: message,
+    };
   }
 
-  console.log(
-    `calldiff ${describeSnapshot(from)} → ${describeSnapshot(to)}\n`,
-  );
+  const trees: DiffResult["trees"] = [];
+  const asciiParts: string[] = [
+    `calldiff ${fromLabel} → ${toLabel}`,
+    "",
+  ];
 
-  let printed = 0;
   for (const entry of entries) {
-    const diff = diffEntry(entry, before, after, options.maxDepth);
+    const diff = diffEntry(entry, before, after, maxDepth);
     if (!diff) continue;
-    if (printed > 0) console.log("");
-    console.log(renderDiff(diff));
-    printed += 1;
+    const ascii = renderDiff(diff, { color });
+    trees.push({
+      entry,
+      ascii: renderDiff(diff, { color: false }),
+      tree: serializeDiffNode(diff),
+    });
+    if (asciiParts.length > 2) asciiParts.push("");
+    asciiParts.push(ascii);
   }
 
-  if (printed === 0) {
-    console.log("No callstack changes for inferred entrypoints.");
+  if (trees.length === 0) {
+    const message = "No callstack changes for inferred entrypoints.";
+    return {
+      mode: "diff",
+      from: fromLabel,
+      to: toLabel,
+      message,
+      trees: [],
+      ascii: `${asciiParts[0]}\n\n${message}`,
+    };
   }
 
-  return 0;
+  return {
+    mode: "diff",
+    from: fromLabel,
+    to: toLabel,
+    trees,
+    ascii: asciiParts.join("\n"),
+  };
 }
 
-export async function run(argv: string[]): Promise<number> {
-  let options;
-  try {
-    options = parseArgs(argv);
-  } catch (error) {
-    console.error(error instanceof Error ? error.message : error);
-    printHelp();
-    return 2;
-  }
+/** Show call tree(s) for entrypoint(s) from a single snapshot. */
+export function runShow(options: ShowRunOptions): ShowResult {
+  const cwd = options.cwd ?? process.cwd();
+  const maxDepth = options.maxDepth ?? 12;
+  const paths = options.paths ?? [];
+  const color = options.color !== false;
 
-  if (options.help) {
-    printHelp();
-    return 0;
-  }
-
-  const cwd = options.cwd;
   assertGitRepo(cwd);
 
-  if (options.mode === "show") {
-    return runShow(cwd, options);
+  const snapshot = resolveSnapshot(options.ref);
+  if (snapshot.kind === "commit") verifyCommit(cwd, snapshot.ref);
+
+  const index = loadIndex(cwd, snapshot, paths);
+  const entries = resolveShowEntries(index, options.entries);
+  const refLabel = describeSnapshot(snapshot);
+
+  const trees: ShowResult["trees"] = [];
+  const asciiParts: string[] = [`calldiff show ${refLabel}`, ""];
+
+  for (const entry of entries) {
+    const tree = buildCallTree(entry, index, maxDepth);
+    const ascii = renderTree(tree, { color });
+    trees.push({
+      entry,
+      ascii: renderTree(tree, { color: false }),
+      tree: serializeCallNode(tree),
+    });
+    if (asciiParts.length > 2) asciiParts.push("");
+    asciiParts.push(ascii);
   }
 
-  return runDiff(cwd, options);
+  return {
+    mode: "show",
+    ref: refLabel,
+    trees,
+    ascii: asciiParts.join("\n"),
+  };
 }

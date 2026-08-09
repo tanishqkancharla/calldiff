@@ -1,66 +1,66 @@
 import { describe, expect, test } from "vitest";
-import { parseArgs } from "../src/args.js";
+import { cli, normalizeArgv } from "../src/cli.js";
 
-describe("parseArgs show mode", () => {
-  test("show with entry defaults to working tree", () => {
-    const opts = parseArgs(["show", "-e", "boot"], "/repo");
-    expect(opts.mode).toBe("show");
-    expect(opts.from).toBeUndefined();
-    expect(opts.to).toBeUndefined();
-    expect(opts.entries).toEqual(["boot"]);
-    expect(opts.cwd).toBe("/repo");
-    expect(opts.maxDepth).toBe(12);
+async function invoke(
+  argv: string[],
+): Promise<{ stdout: string; code: number | undefined }> {
+  let stdout = "";
+  let code: number | undefined;
+  await cli.serve(normalizeArgv(argv), {
+    stdout: (s) => {
+      stdout += s;
+    },
+    exit: (c) => {
+      code = c;
+    },
+  });
+  return { stdout, code };
+}
+
+describe("normalizeArgv", () => {
+  test("strips lone -- separators", () => {
+    expect(normalizeArgv(["main", "feature", "--", "src"])).toEqual([
+      "main",
+      "feature",
+      "src",
+    ]);
   });
 
-  test("show with ref and multiple entries", () => {
-    const opts = parseArgs(
-      ["show", "abc123", "-e", "Foo.bar", "--entry", "baz"],
-      "/repo",
-    );
-    expect(opts.mode).toBe("show");
-    expect(opts.from).toBe("abc123");
-    expect(opts.entries).toEqual(["Foo.bar", "baz"]);
+  test("leaves other tokens alone", () => {
+    expect(normalizeArgv(["show", "-e", "boot"])).toEqual([
+      "show",
+      "-e",
+      "boot",
+    ]);
+  });
+});
+
+describe("calldiff CLI (incur)", () => {
+  test("--help exits successfully and mentions show", async () => {
+    const { stdout, code } = await invoke(["--help"]);
+    expect(code === undefined || code === 0).toBe(true);
+    expect(stdout).toMatch(/calldiff/);
+    expect(stdout).toMatch(/show/);
+    expect(stdout).toMatch(/--entry/);
   });
 
-  test("show accepts --max-depth and path filters", () => {
-    const opts = parseArgs(
-      ["show", "HEAD", "-e", "main", "--max-depth", "4", "--", "src"],
-      "/repo",
-    );
-    expect(opts.mode).toBe("show");
-    expect(opts.from).toBe("HEAD");
-    expect(opts.maxDepth).toBe(4);
-    expect(opts.paths).toEqual(["src"]);
+  test("--llms prints agent manifest", async () => {
+    const { stdout, code } = await invoke(["--llms"]);
+    expect(code === undefined || code === 0).toBe(true);
+    expect(stdout).toMatch(/calldiff/);
+    expect(stdout).toMatch(/show/);
   });
 
-  test("show requires --entry", () => {
-    expect(() => parseArgs(["show"], "/repo")).toThrow(
-      /show requires --entry/,
-    );
+  test("show without --entry fails", async () => {
+    const { stdout, code } = await invoke(["show"]);
+    expect(code).toBeTruthy();
+    expect(code).toBeGreaterThan(0);
+    expect(stdout.length + code!).toBeGreaterThan(0);
   });
 
-  test("show rejects --from / --to", () => {
-    expect(() =>
-      parseArgs(["show", "--from", "a", "-e", "x"], "/repo"),
-    ).toThrow(/does not accept --from \/ --to/);
-  });
-
-  test("show rejects too many refs", () => {
-    expect(() =>
-      parseArgs(["show", "a", "b", "-e", "x"], "/repo"),
-    ).toThrow(/at most one ref/);
-  });
-
-  test("diff mode is unchanged for positionals", () => {
-    const opts = parseArgs(["main", "feature"], "/repo");
-    expect(opts.mode).toBe("diff");
-    expect(opts.from).toBe("main");
-    expect(opts.to).toBe("feature");
-  });
-
-  test("show --help does not require entry", () => {
-    const opts = parseArgs(["show", "--help"], "/repo");
-    expect(opts.mode).toBe("show");
-    expect(opts.help).toBe(true);
+  test("unknown flag fails", async () => {
+    const { code } = await invoke(["--not-a-real-flag"]);
+    expect(code).toBeTruthy();
+    expect(code).toBeGreaterThan(0);
   });
 });

@@ -17,7 +17,7 @@
     "test": "vitest run"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "repository": {
     "type": "git",
@@ -42,6 +42,7 @@
   "author": "Tanishq Kancharla",
   "license": "MIT",
   "dependencies": {
+    "incur": "^0.4.26",
     "picocolors": "^1.1.1",
     "tree-sitter": "^0.25.1",
     "tree-sitter-typescript": "^0.23.2"

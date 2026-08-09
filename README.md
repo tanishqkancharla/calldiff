@@ -46,13 +46,19 @@ calldiff --from main --to feature
 calldiff main feature --entry createAgentSession
 calldiff main feature -e PiService.createAgentSession -e boot
 
-# limit to paths
-calldiff main feature -- src/lib
+# limit to paths (trailing positionals; leading -- also accepted)
+calldiff main feature src/lib
 
 # view a call tree (no diff) — requires --entry
 calldiff show -e createAgentSession
 calldiff show HEAD -e PiService.createAgentSession
-calldiff show main -e boot --max-depth 8 -- src/lib
+calldiff show main -e boot --max-depth 8 src/lib
+
+# agent / machine-readable output (via incur)
+calldiff --format json
+calldiff --llms
+calldiff skills add   # install agent skill files
+calldiff mcp add      # register as MCP server
 ```
 
 ### Semantics (git-diff shaped)
@@ -89,12 +95,18 @@ If you omit `--entry`, calldiff infers exported functions whose expanded call tr
 
 TypeScript, TSX, JavaScript, JSX, Python, Go, Rust, Java, Ruby, C, C++, C#, PHP, Kotlin, Swift, Scala, Lua, Elixir, Bash, Haskell, Zig, Solidity, OCaml.
 
+## Output
+
+- **Default:** colored ASCII callstack trees (TTY) / colorless ASCII when piped — same shape as before.
+- **`--format json|yaml|md|jsonl`:** structured result (`from`/`to`/`trees` with nested nodes + per-entry `ascii`) for agents and scripts.
+- Built on [incur](https://github.com/wevm/incur): `skills add`, `mcp add`, `--llms`, CTAs after diffs, typed flags.
+
 ## How it works
 
 1. Reads source from both git trees (`git show` / working tree)
 2. Detects language by file extension, loads a [tree-sitter](https://tree-sitter.github.io/tree-sitter/) grammar (bundled or on-demand into `~/.cache/calldiff/grammars`), and parses
 3. Builds per-function callee lists and expands them into call trees
-4. Diffs the trees and prints an ASCII callstack diff
+4. Diffs the trees and prints an ASCII callstack diff (or structured output for agents)
 
 Grammars install on first use (override cache with `CALLDIFF_GRAMMAR_CACHE`). This is syntactic (AST-based), not a full typechecker — dynamic calls won’t resolve.
 

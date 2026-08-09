@@ -56,13 +56,34 @@ export interface Snapshot {
 
 export type CliMode = "diff" | "show";
 
-export interface CliOptions {
-  mode: CliMode;
-  from?: string;
-  to?: string;
-  entries: string[];
-  paths: string[];
-  cwd: string;
-  maxDepth: number;
-  help: boolean;
+export interface DiffTreeResult {
+  entry: string;
+  /** Colorless ASCII rendering of this entry's diff tree. */
+  ascii: string;
+  tree: DiffNode;
+}
+
+export interface DiffResult {
+  mode: "diff";
+  from: string;
+  to: string;
+  message?: string;
+  trees: DiffTreeResult[];
+  /** Full human-oriented ASCII output (may include ANSI colors). */
+  ascii: string;
+}
+
+export interface ShowTreeResult {
+  entry: string;
+  /** Colorless ASCII rendering of this entry's call tree. */
+  ascii: string;
+  tree: CallNode;
+}
+
+export interface ShowResult {
+  mode: "show";
+  ref: string;
+  trees: ShowTreeResult[];
+  /** Full human-oriented ASCII output (may include ANSI colors). */
+  ascii: string;
 }

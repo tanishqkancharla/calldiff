@@ -4,7 +4,7 @@
 
 ## Cursor Cloud specific instructions
 
-- This is a single Node.js CLI package (npm, `package-lock.json`). Node `>=20` is required; the VM's default Node satisfies this.
+- This is a single Node.js CLI package (npm, `package-lock.json`). Node `>=22` is required (incur); the VM's default Node satisfies this.
 - Standard commands live in `package.json` `scripts`:
   - Typecheck/build: `npm run build` (runs `tsc`, emits `dist/`). There is no separate lint tool — `tsc` under `strict` is the closest thing to a lint check.
   - Tests: `npm test` (`vitest run`).
