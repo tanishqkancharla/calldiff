@@ -1,7 +1,7 @@
 {
   "name": "calldiff",
   "version": "0.1.0",
-  "description": "Diff call stacks across git commits (22 languages)",
+  "description": "Diff call stacks across git commits for agentic code review (22 languages)",
   "type": "module",
   "bin": {
     "calldiff": "./dist/cli.js"

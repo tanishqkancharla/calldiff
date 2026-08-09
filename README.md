@@ -2,9 +2,9 @@
 
 Diff call stacks across git commits — like `git diff`, but for who-calls-whom.
 
-Works across **22 languages** (TypeScript, TSX, JavaScript, Python, Go, Rust, Java, Ruby, C, C++, C#, PHP, Kotlin, Swift, Scala, Lua, Elixir, Bash, Haskell, Zig, Solidity, OCaml).
+Built for **agentic code review**: when an agent (or you) rewires call flow, plain line diffs bury the shape of the change. `calldiff` shows which callees appeared, disappeared, or moved under an entrypoint — across **22 languages**.
 
-```
+```diff
   PiService.createAgentSession(options)
 - ├─ AuthStorage.create()
 - ├─ new ModelRegistry
@@ -15,10 +15,16 @@ Works across **22 languages** (TypeScript, TSX, JavaScript, Python, Go, Rust, Ja
 + │  └─ new ModelRegistry
 ```
 
+## Prompt for agents
+
+Paste this when you want a walkthrough of call-flow changes:
+
+> dearest clod, walk me through the code changes you made using `npx calldiff@latest`
+
 ## Install
 
 ```bash
-npx calldiff
+npx calldiff@latest
 # or
 npm install -g calldiff
 ```
@@ -63,6 +69,10 @@ calldiff main feature -- src/lib
 - `if (cond)` / `else` / `else if (cond)` — conditional arms (no continuing `│` rail)
 
 If you omit `--entry`, calldiff infers exported functions whose expanded call trees changed (and may show several).
+
+### Supported languages
+
+TypeScript, TSX, JavaScript, Python, Go, Rust, Java, Ruby, C, C++, C#, PHP, Kotlin, Swift, Scala, Lua, Elixir, Bash, Haskell, Zig, Solidity, OCaml.
 
 ## How it works
 

@@ -105,7 +105,7 @@ export function parseArgs(argv: string[], cwd = process.cwd()): CliOptions {
 }
 
 export function printHelp(): void {
-  console.log(`calldiff — diff call stacks across git commits (22 languages)
+  console.log(`calldiff — diff call stacks across git commits for agentic review (22 languages)
 
 Usage:
   calldiff
