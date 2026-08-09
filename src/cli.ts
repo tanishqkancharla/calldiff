@@ -120,6 +120,8 @@ export const cli = Cli.create("calldiff", {
   ],
   hint: "Semantics match git diff: no refs → HEAD vs worktree; one ref → that vs worktree; two refs → compare those trees. Path filters are trailing positionals (a leading -- is also accepted). Use --format json for structured agent output.",
   sync: {
+    // One skill file covering root + show (default incur depth is 1 = per-command).
+    depth: 0,
     suggestions: [
       "Diff HEAD against my working tree with calldiff",
       "Show the call tree for createAgentSession with calldiff show",
