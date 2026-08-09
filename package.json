@@ -1,6 +1,6 @@
 {
   "name": "calldiff",
-  "version": "0.2.0",
+  "version": "0.4.0",
   "description": "Diff call stacks across git commits for agentic code review (22 languages)",
   "type": "module",
   "bin": {
