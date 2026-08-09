@@ -1,7 +1,7 @@
 import { buildCallTree } from "../src/calltree.js";
 import { diffTrees } from "../src/diff.js";
 import { buildIndex, extractFunctions } from "../src/extract.js";
-import { renderDiff } from "../src/render.js";
+import { renderDiff, renderTree } from "../src/render.js";
 
 export type CallstackDiffOptions = {
   maxDepth?: number;
@@ -93,4 +93,20 @@ export function callstackDiff(
   const afterTree = buildCallTree(entry, after, maxDepth);
   const diff = diffTrees(beforeTree, afterTree);
   return renderDiff(diff, { color: false });
+}
+
+/**
+ * Expand a call tree for an entrypoint from a single source file.
+ * Returns colorless ASCII output (no +/- markers).
+ */
+export function callstackShow(
+  source: string,
+  entry: string,
+  options: CallstackDiffOptions = {},
+): string {
+  const maxDepth = options.maxDepth ?? 12;
+  const file = options.file ?? "file.ts";
+  const index = buildIndex(extractFunctions(file, source));
+  const tree = buildCallTree(entry, index, maxDepth);
+  return renderTree(tree, { color: false });
 }

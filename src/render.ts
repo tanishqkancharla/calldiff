@@ -1,5 +1,5 @@
 import pc from "picocolors";
-import type { DiffNode, DiffStatus } from "./types.js";
+import type { CallNode, DiffNode, DiffStatus } from "./types.js";
 
 function paint(status: DiffStatus, text: string): string {
   switch (status) {
@@ -28,12 +28,17 @@ export interface RenderOptions {
   color?: boolean;
 }
 
-/**
- * Render a callstack diff as an ASCII tree with +/- markers.
- */
-export function renderDiff(
-  root: DiffNode,
-  options: RenderOptions = {},
+type TreeLike = {
+  label: string;
+  kind?: CallNode["kind"];
+  children: TreeLike[];
+  status?: DiffStatus;
+};
+
+function renderAsciiTree(
+  root: TreeLike,
+  options: RenderOptions,
+  withStatus: boolean,
 ): string {
   const useColor = options.color !== false;
 
@@ -57,13 +62,18 @@ export function renderDiff(
   const lines: string[] = [];
 
   const walk = (
-    node: DiffNode,
+    node: TreeLike,
     indent: string,
     isLast: boolean,
     isRoot: boolean,
   ) => {
     const branch = isRoot ? "" : isLast ? "└─ " : "├─ ";
-    const line = `${statusPrefix(node.status)} ${indent}${branch}${paintStatus(node.status, node.label)}`;
+    const label = withStatus
+      ? paintStatus(node.status ?? "same", node.label)
+      : node.label;
+    const line = withStatus
+      ? `${statusPrefix(node.status ?? "same")} ${indent}${branch}${label}`
+      : `${indent}${branch}${label}`;
     lines.push(line);
 
     // Conditional arms omit the continuing │ rail — they are alternate paths,
@@ -84,4 +94,24 @@ export function renderDiff(
 
   walk(root, "", true, true);
   return lines.join("\n");
+}
+
+/**
+ * Render a callstack diff as an ASCII tree with +/- markers.
+ */
+export function renderDiff(
+  root: DiffNode,
+  options: RenderOptions = {},
+): string {
+  return renderAsciiTree(root, options, true);
+}
+
+/**
+ * Render a single call tree as an ASCII tree (no +/- markers).
+ */
+export function renderTree(
+  root: CallNode,
+  options: RenderOptions = {},
+): string {
+  return renderAsciiTree(root, options, false);
 }

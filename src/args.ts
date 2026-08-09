@@ -15,9 +15,15 @@ function takeValue(argv: string[], i: number, flag: string): [string, number] {
  *   calldiff <from> <to>
  *   calldiff --from <ref> --to <ref>
  *   calldiff ... --entry Name [--entry Class.method] -- [paths...]
+ *
+ * View mode:
+ *   calldiff show
+ *   calldiff show <ref>
+ *   calldiff show [<ref>] --entry Name ...
  */
 export function parseArgs(argv: string[], cwd = process.cwd()): CliOptions {
   const options: CliOptions = {
+    mode: "diff",
     entries: [],
     paths: [],
     cwd,
@@ -82,6 +88,31 @@ export function parseArgs(argv: string[], cwd = process.cwd()): CliOptions {
     i += 1;
   }
 
+  if (positionals[0] === "show") {
+    options.mode = "show";
+    positionals.shift();
+
+    if (options.from !== undefined || options.to !== undefined) {
+      throw new Error("calldiff show does not accept --from / --to");
+    }
+
+    if (positionals.length > 1) {
+      throw new Error(
+        `Too many arguments for show: expected at most one ref, got ${positionals.length}`,
+      );
+    }
+
+    if (positionals[0]) {
+      options.from = positionals[0];
+    }
+
+    if (!options.help && options.entries.length === 0) {
+      throw new Error("calldiff show requires --entry / -e");
+    }
+
+    return options;
+  }
+
   // Positional refs fill in from/to when flags weren't set (git-diff style).
   if (positionals.length > 2) {
     throw new Error(
@@ -113,17 +144,24 @@ Usage:
   calldiff <from> <to>
   calldiff --from <ref> --to <ref>
   calldiff [refs] --entry <name> [--entry <Class.method>] [-- paths...]
+  calldiff show [<ref>] --entry <name> [--entry <Class.method>] [-- paths...]
 
 Semantics (like git diff):
   (no refs)     from=HEAD, to=working tree
   <from>        from=<from>, to=working tree
   <from> <to>   compare those two trees
 
+View (no diff):
+  show          call tree(s) from working tree
+  show <ref>    call tree(s) from that commit/ref
+                requires -e/--entry
+
 Options:
-  --from <ref>       Left / "before" tree
-  --to <ref>         Right / "after" tree
+  --from <ref>       Left / "before" tree (diff mode)
+  --to <ref>         Right / "after" tree (diff mode)
   -e, --entry <name> Entrypoint(s): functionName or ClassName.method
-                     If omitted, infer exported functions whose call trees changed
+                     Diff: if omitted, infer exported functions whose call trees changed
+                     Show: required
   --max-depth <n>    Max call-tree depth (default: 12)
   -h, --help         Show help
 

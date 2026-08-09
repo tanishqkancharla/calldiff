@@ -54,7 +54,10 @@ export interface Snapshot {
   ref: string;
 }
 
+export type CliMode = "diff" | "show";
+
 export interface CliOptions {
+  mode: CliMode;
   from?: string;
   to?: string;
   entries: string[];

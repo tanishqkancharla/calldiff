@@ -36,6 +36,14 @@ export function resolveSnapshots(
   return { from: left, to: right };
 }
 
+/** Single snapshot for `calldiff show` — no ref → working tree. */
+export function resolveSnapshot(ref: string | undefined): Snapshot {
+  if (ref === undefined) {
+    return { kind: "worktree", ref: "WORKTREE" };
+  }
+  return { kind: "commit", ref };
+}
+
 export function verifyCommit(cwd: string, ref: string): void {
   try {
     git(cwd, ["rev-parse", "--verify", `${ref}^{commit}`]);

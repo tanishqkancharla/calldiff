@@ -48,6 +48,11 @@ calldiff main feature -e PiService.createAgentSession -e boot
 
 # limit to paths
 calldiff main feature -- src/lib
+
+# view a call tree (no diff) — requires --entry
+calldiff show -e createAgentSession
+calldiff show HEAD -e PiService.createAgentSession
+calldiff show main -e boot --max-depth 8 -- src/lib
 ```
 
 ### Semantics (git-diff shaped)
@@ -60,6 +65,15 @@ calldiff main feature -- src/lib
 
 `-` lines were present in **from** and gone in **to**.  
 `+` lines are new in **to**.
+
+### View (no diff)
+
+| Invocation | Tree from |
+|---|---|
+| `calldiff show -e <name>` | working tree |
+| `calldiff show <ref> -e <name>` | that commit/ref |
+
+Prints a plain ASCII call tree (no `+/−` markers). `--entry` / `-e` is required.
 
 ### Labels
 
