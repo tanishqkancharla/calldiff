@@ -1,7 +1,7 @@
 {
   "name": "calldiff",
   "version": "0.1.0",
-  "description": "Diff TypeScript call stacks across git commits",
+  "description": "Diff call stacks across git commits for agentic code review (22 languages)",
   "type": "module",
   "bin": {
     "calldiff": "./dist/cli.js"
@@ -30,10 +30,14 @@
   "keywords": [
     "callgraph",
     "diff",
-    "typescript",
+    "callstack",
     "tree-sitter",
     "git",
-    "callstack"
+    "multi-language",
+    "typescript",
+    "python",
+    "rust",
+    "go"
   ],
   "author": "Tanishq Kancharla",
   "license": "MIT",

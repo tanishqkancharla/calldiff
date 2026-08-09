@@ -105,7 +105,7 @@ export function parseArgs(argv: string[], cwd = process.cwd()): CliOptions {
 }
 
 export function printHelp(): void {
-  console.log(`calldiff — diff TypeScript call stacks across git commits
+  console.log(`calldiff — diff call stacks across git commits for agentic review (22 languages)
 
 Usage:
   calldiff
@@ -131,5 +131,9 @@ Labels:
   functionName
   ClassName.method
   new ClassName
+
+Languages:
+  TypeScript, TSX, JavaScript, Python, Go, Rust, Java, Ruby, C, C++, C#,
+  PHP, Kotlin, Swift, Scala, Lua, Elixir, Bash, Haskell, Zig, Solidity, OCaml
 `);
 }

@@ -11,7 +11,7 @@ type CallstackAssertion = {
 
 /**
  * Vitest fixtures for the callstack-diff test format:
- * a +/- TypeScript file diff in, ASCII callstack diff out.
+ * a +/- source file diff in, ASCII callstack diff out.
  */
 export const test = base.extend<{
   /**

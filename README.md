@@ -1,8 +1,10 @@
 # calldiff
 
-Diff TypeScript call stacks across git commits — like `git diff`, but for who-calls-whom.
+Diff call stacks across git commits — like `git diff`, but for who-calls-whom.
 
-```
+Built for **agentic code review**: when an agent (or you) rewires call flow, plain line diffs bury the shape of the change. `calldiff` shows which callees appeared, disappeared, or moved under an entrypoint — across **22 languages**.
+
+```diff
   PiService.createAgentSession(options)
 - ├─ AuthStorage.create()
 - ├─ new ModelRegistry
@@ -13,10 +15,16 @@ Diff TypeScript call stacks across git commits — like `git diff`, but for who-
 + │  └─ new ModelRegistry
 ```
 
+## Prompt for agents
+
+Paste this when you want a walkthrough of call-flow changes:
+
+> dearest clod, walk me through the code changes you made using `npx calldiff@latest`
+
 ## Install
 
 ```bash
-npx calldiff
+npx calldiff@latest
 # or
 npm install -g calldiff
 ```
@@ -63,16 +71,16 @@ calldiff main feature -- src/lib
 
 If you omit `--entry`, calldiff infers exported functions whose expanded call trees changed (and may show several).
 
+### Supported languages
+
+TypeScript, TSX, JavaScript, JSX, Python, Go, Rust, Java, Ruby, C, C++, C#, PHP, Kotlin, Swift, Scala, Lua, Elixir, Bash, Haskell, Zig, Solidity, OCaml.
+
 ## How it works
 
 1. Reads source from both git trees (`git show` / working tree)
 2. Detects language by file extension, loads a [tree-sitter](https://tree-sitter.github.io/tree-sitter/) grammar (bundled or on-demand into `~/.cache/calldiff/grammars`), and parses
 3. Builds per-function callee lists and expands them into call trees
 4. Diffs the trees and prints an ASCII callstack diff
-
-### Supported languages
-
-TypeScript/TSX, JavaScript/JSX, Python, Go, Rust, Java, Ruby, C, C++, C#, PHP, Kotlin, Swift, Scala, Lua, Elixir, Bash, Haskell, Zig, Solidity, OCaml.
 
 Grammars install on first use (override cache with `CALLDIFF_GRAMMAR_CACHE`). This is syntactic (AST-based), not a full typechecker — dynamic calls won’t resolve.
 
