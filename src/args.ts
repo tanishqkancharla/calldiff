@@ -1,4 +1,8 @@
-import type { CliOptions } from "./types.js";
+import type {
+  CliOptions,
+  DiffCliOptions,
+  SnapshotCliOptions,
+} from "./types.js";
 
 function takeValue(argv: string[], i: number, flag: string): [string, number] {
   const next = argv[i + 1];
@@ -8,16 +12,62 @@ function takeValue(argv: string[], i: number, flag: string): [string, number] {
   return [next, i + 1];
 }
 
-/**
- * Git-diff-shaped args:
- *   calldiff
- *   calldiff <from>
- *   calldiff <from> <to>
- *   calldiff --from <ref> --to <ref>
- *   calldiff ... --entry Name [--entry Class.method] -- [paths...]
- */
+function optionArguments(argv: string[]): string[] {
+  const pathSeparator = argv.indexOf("--");
+  return pathSeparator < 0 ? argv : argv.slice(0, pathSeparator);
+}
+
+function hasSnapshotFlag(argv: string[]): boolean {
+  return optionArguments(argv).includes("--snapshot");
+}
+
+function parseSnapshotArgs(argv: string[], cwd: string): SnapshotCliOptions {
+  const options: SnapshotCliOptions = {
+    command: "snapshot",
+    ref: "HEAD",
+    paths: [],
+    cwd,
+    help:
+      optionArguments(argv).includes("-h") ||
+      optionArguments(argv).includes("--help"),
+  };
+  if (options.help) return options;
+
+  let i = 0;
+  while (i < argv.length) {
+    const arg = argv[i]!;
+    if (arg === "--") {
+      options.paths.push(...argv.slice(i + 1));
+      break;
+    }
+    if (arg === "--snapshot") {
+      const [value, next] = takeValue(argv, i, arg);
+      options.ref = value;
+      i = next + 1;
+      continue;
+    }
+    if (arg === "--output" || arg === "-o") {
+      const [value, next] = takeValue(argv, i, arg);
+      options.output = value;
+      i = next + 1;
+      continue;
+    }
+    if (arg.startsWith("-")) {
+      throw new Error(`Unknown snapshot option: ${arg}`);
+    }
+    throw new Error(`Unexpected snapshot argument: ${arg}`);
+  }
+  return options;
+}
+
+/** Parse snapshot flags or the default git-diff-shaped command. */
 export function parseArgs(argv: string[], cwd = process.cwd()): CliOptions {
-  const options: CliOptions = {
+  if (hasSnapshotFlag(argv)) {
+    return parseSnapshotArgs(argv, cwd);
+  }
+
+  const options: DiffCliOptions = {
+    command: "diff",
     entries: [],
     paths: [],
     cwd,
@@ -113,6 +163,7 @@ Usage:
   calldiff <from> <to>
   calldiff --from <ref> --to <ref>
   calldiff [refs] --entry <name> [--entry <Class.method>] [-- paths...]
+  calldiff --snapshot <ref> --output <directory> [-- paths...]
 
 Semantics (like git diff):
   (no refs)     from=HEAD, to=working tree
@@ -125,7 +176,13 @@ Options:
   -e, --entry <name> Entrypoint(s): functionName or ClassName.method
                      If omitted, infer exported functions whose call trees changed
   --max-depth <n>    Max call-tree depth (default: 12)
+  --snapshot <ref>   Write one repository call snapshot instead of a diff
+  -o, --output <dir> New snapshot output directory (with --snapshot)
   -h, --help         Show help
+
+Snapshot output:
+  calldiff-call-snapshot.json   Canonical machine record
+  calldiff-call-snapshot.html   Searchable human projection
 
 Labels:
   functionName

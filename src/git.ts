@@ -6,18 +6,23 @@ import type { Snapshot } from "./types.js";
 function git(cwd: string, args: string[]): string {
   return execFileSync("git", args, {
     cwd,
+    env: { ...process.env, GIT_NO_REPLACE_OBJECTS: "1" },
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
     stdio: ["ignore", "pipe", "pipe"],
   });
 }
 
-export function assertGitRepo(cwd: string): void {
+export function repositoryRoot(cwd: string): string {
   try {
-    git(cwd, ["rev-parse", "--is-inside-work-tree"]);
+    return git(cwd, ["rev-parse", "--show-toplevel"]).trim();
   } catch {
     throw new Error(`Not a git repository: ${cwd}`);
   }
+}
+
+export function assertGitRepo(cwd: string): void {
+  repositoryRoot(cwd);
 }
 
 export function resolveSnapshots(
@@ -36,12 +41,16 @@ export function resolveSnapshots(
   return { from: left, to: right };
 }
 
-export function verifyCommit(cwd: string, ref: string): void {
+export function resolveCommit(cwd: string, ref: string): string {
   try {
-    git(cwd, ["rev-parse", "--verify", `${ref}^{commit}`]);
+    return git(cwd, ["rev-parse", "--verify", `${ref}^{commit}`]).trim();
   } catch {
     throw new Error(`Unknown git ref: ${ref}`);
   }
+}
+
+export function verifyCommit(cwd: string, ref: string): void {
+  resolveCommit(cwd, ref);
 }
 
 import { listSupportedExtensions } from "./languages/registry.js";
@@ -89,23 +98,39 @@ function walkWorktree(root: string, dir: string, out: string[]): void {
 }
 
 function listCommitSourceFiles(cwd: string, ref: string): string[] {
-  const output = git(cwd, ["ls-tree", "-r", "--name-only", ref]);
+  const output = git(cwd, [
+    "ls-tree",
+    "-rz",
+    "--full-tree",
+    "--name-only",
+    ref,
+  ]);
   return output
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line && isSourceFile(line));
+    .split("\0")
+    .filter((file) => file.length > 0 && isSourceFile(file));
+}
+
+function compareText(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+/** Normalize CLI filters to sorted repository-relative `/` paths. */
+export function normalizePathFilters(pathFilters: string[]): string[] {
+  const normalized = pathFilters.map((filter) =>
+    filter
+      .replaceAll("\\", "/")
+      .replace(/^\.\/+/, "")
+      .replace(/\/+$/, ""),
+  );
+  if (normalized.some((filter) => filter === "" || filter === ".")) return [];
+  return [...new Set(normalized)].sort(compareText);
 }
 
 function pathAllowed(file: string, pathFilters: string[]): boolean {
   if (pathFilters.length === 0) return true;
-  return pathFilters.some((filter) => {
-    const normalized = filter.replace(/^\.\//, "").replace(/\/$/, "");
-    return (
-      file === normalized ||
-      file.startsWith(`${normalized}/`) ||
-      file.endsWith(normalized)
-    );
-  });
+  return pathFilters.some(
+    (filter) => file === filter || file.startsWith(`${filter}/`),
+  );
 }
 
 /** @deprecated Use listSourceFiles */
@@ -131,7 +156,8 @@ export function listSourceFiles(
         })()
       : listCommitSourceFiles(cwd, snapshot.ref);
 
-  return files.filter((file) => pathAllowed(file, pathFilters)).sort();
+  const normalizedFilters = normalizePathFilters(pathFilters);
+  return files.filter((file) => pathAllowed(file, normalizedFilters)).sort();
 }
 
 export function readSnapshotFile(

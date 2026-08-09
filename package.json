@@ -3,6 +3,14 @@
   "version": "0.1.0",
   "description": "Diff call stacks across git commits for agentic code review (22 languages)",
   "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
   "bin": {
     "calldiff": "./dist/cli.js"
   },
@@ -11,6 +19,7 @@
   ],
   "scripts": {
     "build": "tsc",
+    "prepare": "npm run build",
     "prepublishOnly": "npm run build",
     "dev": "tsx src/cli.ts",
     "start": "node dist/cli.js",

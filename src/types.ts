@@ -54,7 +54,8 @@ export interface Snapshot {
   ref: string;
 }
 
-export interface CliOptions {
+export interface DiffCliOptions {
+  command: "diff";
   from?: string;
   to?: string;
   entries: string[];
@@ -63,3 +64,14 @@ export interface CliOptions {
   maxDepth: number;
   help: boolean;
 }
+
+export interface SnapshotCliOptions {
+  command: "snapshot";
+  ref: string;
+  output?: string;
+  paths: string[];
+  cwd: string;
+  help: boolean;
+}
+
+export type CliOptions = DiffCliOptions | SnapshotCliOptions;

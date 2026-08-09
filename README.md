@@ -50,6 +50,54 @@ calldiff main feature -e PiService.createAgentSession -e boot
 calldiff main feature -- src/lib
 ```
 
+### Repository call snapshot
+
+Generate every extracted function and its direct call/branch structure from one
+commit, rather than a diff rooted at one entrypoint:
+
+```bash
+calldiff --snapshot HEAD --output .calldiff/head -- src
+
+# Canonical machine record for agents, jq, or Neovim
+nvim .calldiff/head/calldiff-call-snapshot.json
+jq '.summary' .calldiff/head/calldiff-call-snapshot.json
+
+# Searchable, collapsible, syntax-colored human projection
+open .calldiff/head/calldiff-call-snapshot.html       # macOS
+xdg-open .calldiff/head/calldiff-call-snapshot.html  # Linux
+```
+
+The JSON file is authoritative. The HTML file is derived from the same record
+and links back to it. Calls report `unique-key-match`, `multiple-key-matches`,
+or `no-key-match`; these are syntactic matches within the selected files that
+parsed successfully, not type resolution. A missing key match does not prove
+that a call is external. The output directory must be new, so a later run cannot
+overwrite prior evidence.
+
+### Frozen-file library API
+
+Integrators can analyze exact retained bytes without letting calldiff read a
+repository or worktree:
+
+```ts
+import {
+  analyzeRepositoryFiles,
+  diffRepositoryCallSnapshots,
+  projectRepositoryCallSnapshot,
+} from "calldiff";
+
+const before = analyzeRepositoryFiles(beforeFiles, "subject/before");
+const after = analyzeRepositoryFiles(afterFiles, "subject/after");
+const delta = diffRepositoryCallSnapshots(before, after);
+const localView = projectRepositoryCallSnapshot(after, ["src/cli.ts"]);
+```
+
+`analyzeRepositoryFiles` accepts `{ path, content }` records. The caller owns
+selection and freezing. A projection includes selected definitions, direct
+syntactic key matches, direct callers, diagnostics, and an omitted-definition
+count.
+The canonical snapshot remains the source of truth.
+
 ### Semantics (git-diff shaped)
 
 | Invocation | From | To |

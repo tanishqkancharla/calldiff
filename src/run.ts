@@ -1,42 +1,79 @@
+import { relative, resolve } from "node:path";
 import { parseArgs, printHelp } from "./args.js";
-import { buildIndex, extractFunctions } from "./extract.js";
+import { buildIndex } from "./extract.js";
 import {
-  assertGitRepo,
   describeSnapshot,
-  listTsFiles,
-  readSnapshotFile,
+  normalizePathFilters,
+  repositoryRoot,
+  resolveCommit,
   resolveSnapshots,
   verifyCommit,
 } from "./git.js";
 import { diffEntry, inferEntries } from "./infer.js";
+import { loadFunctions } from "./load.js";
 import { renderDiff } from "./render.js";
-import type { Snapshot } from "./types.js";
+import { buildRepositoryCallSnapshot } from "./repository-snapshot.js";
+import { writeRepositoryCallSnapshotBundle } from "./repository-snapshot-output.js";
 import type { FunctionIndex } from "./extract.js";
+import type { Snapshot, SnapshotCliOptions } from "./types.js";
 
 function loadIndex(
   cwd: string,
   snapshot: Snapshot,
   pathFilters: string[],
 ): FunctionIndex {
-  const files = listTsFiles(cwd, snapshot, pathFilters);
-  const all = [];
-  for (const file of files) {
-    const source = readSnapshotFile(cwd, snapshot, file);
-    if (source === null) continue;
-    try {
-      all.push(...extractFunctions(file, source));
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.error(`warn: failed to parse ${file} @ ${snapshot.ref}: ${message}`);
-    }
+  const loaded = loadFunctions(cwd, snapshot, pathFilters);
+  for (const diagnostic of loaded.diagnostics) {
+    console.error(
+      `warn: failed to parse ${diagnostic.file} @ ${snapshot.ref}: ${diagnostic.message}`,
+    );
   }
-  return buildIndex(all);
+  return buildIndex(loaded.functions);
 }
 
-export async function run(argv: string[]): Promise<number> {
+function runSnapshot(options: SnapshotCliOptions, repoRoot: string): number {
+  if (!options.output) {
+    console.error("Missing required snapshot option: --output <directory>");
+    return 2;
+  }
+
+  const commit = resolveCommit(repoRoot, options.ref);
+  const pathFilters = normalizePathFilters(options.paths);
+  const loaded = loadFunctions(
+    repoRoot,
+    { kind: "commit", ref: commit },
+    pathFilters,
+    { failOnReadError: true },
+  );
+  const snapshot = buildRepositoryCallSnapshot(loaded, {
+    requestedRef: options.ref,
+    commit,
+    pathFilters,
+  });
+  const outputDirectory = resolve(options.cwd, options.output);
+  const written = writeRepositoryCallSnapshotBundle(snapshot, outputDirectory);
+  const summary = snapshot.summary;
+
+  console.log(
+    `calldiff snapshot ${commit.slice(0, 12)}: ${summary.definitions} definitions, ${summary.calls} calls, ${summary.branches} branches`,
+  );
+  console.log(`machine: ${relative(options.cwd, written.jsonPath)}`);
+  console.log(`human:   ${relative(options.cwd, written.htmlPath)}`);
+  if (summary.parseWarnings > 0) {
+    console.error(
+      `warn: ${summary.parseWarnings} files failed to parse; inspect diagnostics in the JSON snapshot`,
+    );
+  }
+  return 0;
+}
+
+export async function run(
+  argv: string[],
+  invocationCwd = process.cwd(),
+): Promise<number> {
   let options;
   try {
-    options = parseArgs(argv);
+    options = parseArgs(argv, invocationCwd);
   } catch (error) {
     console.error(error instanceof Error ? error.message : error);
     printHelp();
@@ -48,8 +85,16 @@ export async function run(argv: string[]): Promise<number> {
     return 0;
   }
 
-  const cwd = options.cwd;
-  assertGitRepo(cwd);
+  const cwd = repositoryRoot(options.cwd);
+
+  if (options.command === "snapshot") {
+    try {
+      return runSnapshot(options, cwd);
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : error);
+      return 1;
+    }
+  }
 
   const { from, to } = resolveSnapshots(options.from, options.to);
   if (from.kind === "commit") verifyCommit(cwd, from.ref);
