@@ -1,6 +1,8 @@
 # calldiff
 
-Diff TypeScript call stacks across git commits — like `git diff`, but for who-calls-whom.
+Diff call stacks across git commits — like `git diff`, but for who-calls-whom.
+
+Works across **22 languages** (TypeScript, TSX, JavaScript, Python, Go, Rust, Java, Ruby, C, C++, C#, PHP, Kotlin, Swift, Scala, Lua, Elixir, Bash, Haskell, Zig, Solidity, OCaml).
 
 ```
   PiService.createAgentSession(options)
@@ -68,10 +70,6 @@ If you omit `--entry`, calldiff infers exported functions whose expanded call tr
 2. Detects language by file extension, loads a [tree-sitter](https://tree-sitter.github.io/tree-sitter/) grammar (bundled or on-demand into `~/.cache/calldiff/grammars`), and parses
 3. Builds per-function callee lists and expands them into call trees
 4. Diffs the trees and prints an ASCII callstack diff
-
-### Supported languages
-
-TypeScript/TSX, JavaScript, Python, Go, Rust, Java, Ruby, C, C++, C#, PHP, Kotlin, Swift, Scala, Lua, Elixir, Bash, Haskell, Zig, Solidity, OCaml.
 
 Grammars install on first use (override cache with `CALLDIFF_GRAMMAR_CACHE`). This is syntactic (AST-based), not a full typechecker — dynamic calls won’t resolve.
 
