@@ -98,3 +98,34 @@ test("typescriptreact: diffs React component trees", ({ expectCallstack }) => {
     +       └─ trackFollow()
   `);
 });
+
+test("typescriptreact: recursive JSX keeps nested call-site children", ({
+  expectCallstack,
+}) => {
+  expectCallstack(
+    `
+      export function Foo() {
+        return (
+          <Foo>
+    -       <Bar />
+    +       <Bar />
+    +       <Baz />
+          </Foo>
+        );
+      }
+      function Bar() {
+        return null;
+      }
+    + function Baz() {
+    +   return null;
+    + }
+    `,
+    "Foo",
+    { file: "Foo.tsx" },
+  ).toEqual(`
+      Foo()
+      └─ Foo() ⇄
+         ├─ Bar()
+    +    └─ Baz()
+  `);
+});

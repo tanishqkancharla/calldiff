@@ -60,7 +60,16 @@ function expandCall(
   }
 
   if (info && visiting.has(key)) {
-    return { key, label: `${label} ⇄`, kind: "call", children: [] };
+    // Still expand call-site JSX children; they are not a re-entry into `key`'s body.
+    const callSiteChildren = inlineChildren?.length
+      ? expandSteps(inlineChildren, index, depth + 1, maxDepth, visiting)
+      : [];
+    return {
+      key,
+      label: `${label} ⇄`,
+      kind: "call",
+      children: callSiteChildren,
+    };
   }
 
   if (info) visiting.add(key);
