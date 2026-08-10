@@ -99,6 +99,96 @@ test("typescriptreact: diffs React component trees", ({ expectCallstack }) => {
   `);
 });
 
+test("typescriptreact: labels hook dependency arrays", ({
+  expectCallstack,
+}) => {
+  expectCallstack(
+    `
+      export function Profile({ userId }: { userId: string }) {
+        const [user, setUser] = useState(null);
+        useEffect(() => {
+          setUser(userId);
+        }, [userId]);
+        const label = useMemo(() => String(user), [user]);
+    +   const onSelect = useCallback(() => select(userId), [userId, select]);
+        useEffect(() => {
+          log(label);
+        });
+        return <Badge title={label} />;
+      }
+      function Badge(_props: { title: string }) {
+        return null;
+      }
+    `,
+    "Profile",
+    { file: "Profile.tsx" },
+  ).toEqual(`
+      Profile({})
+      ├─ useState()
+      ├─ useEffect([userId])
+      ├─ useMemo([user])
+    + ├─ useCallback([userId, select])
+      ├─ useEffect()
+      └─ Badge(_props)
+  `);
+});
+
+test("typescriptreact: dep-array changes surface in the diff", ({
+  expectCallstack,
+}) => {
+  expectCallstack(
+    `
+      export function Search({ query, page }: { query: string; page: number }) {
+    -   useEffect(() => {
+    -     fetchResults(query);
+    -   }, [query]);
+    +   useEffect(() => {
+    +     fetchResults(query, page);
+    +   }, [query, page]);
+        return <Results />;
+      }
+      function fetchResults(_q: string, _p?: number) {}
+      function Results() {
+        return null;
+      }
+    `,
+    "Search",
+    { file: "Search.tsx" },
+  ).toEqual(`
+      Search({})
+    - ├─ useEffect([query])
+    + ├─ useEffect([query, page])
+      └─ Results()
+  `);
+});
+
+test("typescript: labels hook deps in custom hook files", ({
+  expectCallstack,
+}) => {
+  expectCallstack(
+    `
+      export function useThing(id: string) {
+        const value = useMemo(() => compute(id), [id]);
+        useEffect(() => {
+          subscribe(id);
+    -   }, []);
+    +   }, [id]);
+        return value;
+      }
+      function compute(_id: string) {
+        return 1;
+      }
+    `,
+    "useThing",
+    { file: "useThing.ts" },
+  ).toEqual(`
+      useThing(id)
+      ├─ useMemo([id])
+    - ├─ useEffect([])
+    + └─ useEffect([id])
+  `);
+});
+
 test("typescriptreact: recursive JSX keeps nested call-site children", ({
   expectCallstack,
 }) => {

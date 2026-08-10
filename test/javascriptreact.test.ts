@@ -36,6 +36,33 @@ test("javascriptreact: tracks JSX components as nested calls", ({
   `);
 });
 
+test("javascriptreact: labels hook dependency arrays", ({
+  expectCallstack,
+}) => {
+  expectCallstack(
+    `
+      export function Ticker({ speed }) {
+    -   useEffect(() => {
+    -     start(speed);
+    -   }, []);
+    +   useEffect(() => {
+    +     start(speed);
+    +   }, [speed]);
+        return <Display />;
+      }
+      function start(_s) {}
+      function Display() { return null; }
+    `,
+    "Ticker",
+    { file: "ticker.jsx" },
+  ).toEqual(`
+      Ticker({})
+    - ├─ useEffect([])
+    + ├─ useEffect([speed])
+      └─ Display()
+  `);
+});
+
 test("javascriptreact: skips lowercase HTML tags, nests components", ({
   expectCallstack,
 }) => {

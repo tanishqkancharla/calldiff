@@ -107,6 +107,7 @@ Prints every call path from the entrypoint to the target (including alternate `i
 - `ClassName.method` — class method
 - `new ClassName` — constructor / `new` call
 - `Component` — JSX/TSX component tags (`<Button />`); children nest under the parent
+- `useEffect([userId])` — React hooks show their dependency array (`useEffect`, `useLayoutEffect`, `useInsertionEffect`, `useMemo`, `useCallback`, `useImperativeHandle`); dep changes surface in diffs as `- useEffect([query])` / `+ useEffect([query, page])`
 - `if (cond)` / `else` / `else if (cond)` — conditional arms (no continuing `│` rail)
 - `file:line` — call-site (or root definition) location; enable with `--locs` (default off)
 

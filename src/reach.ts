@@ -8,7 +8,8 @@ function nodeMatchesTarget(
   rawTarget: string,
 ): boolean {
   if (nodeKey === resolvedTarget || nodeKey === rawTarget) return true;
-  const stripped = nodeKey.replace(/\(\)$/, "");
+  // Also strip argument suffixes like `([deps])` so `--to useEffect` matches.
+  const stripped = nodeKey.replace(/\(.*\)$/, "");
   if (stripped === resolvedTarget || stripped === rawTarget) return true;
   return (
     nodeKey.endsWith(`.${rawTarget}`) ||

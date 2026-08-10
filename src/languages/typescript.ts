@@ -2,6 +2,7 @@
  * TypeScript / TSX callable extraction (tree-sitter-typescript).
  */
 import type { CallStep, FunctionInfo } from "../types.js";
+import { withHookDeps } from "./reactHooks.js";
 import {
   childByType,
   collapseWs,
@@ -226,7 +227,7 @@ function collectStatements(
       const callee = node.namedChild(0);
       if (callee) {
         const key = calleeKey(callee, className);
-        if (key) addCall(key, node);
+        if (key) addCall(withHookDeps(key, node), node);
       }
     } else if (type === "new_expression") {
       const callee = node.namedChild(0);
