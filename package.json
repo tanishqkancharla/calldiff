@@ -3,6 +3,12 @@
   "version": "0.4.1",
   "description": "Diff call stacks across git commits for agentic code review (22 languages)",
   "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
   "bin": {
     "calldiff": "dist/cli.js"
   },
