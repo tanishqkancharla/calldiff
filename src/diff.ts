@@ -1,3 +1,4 @@
+import { pickLoc } from "./loc.js";
 import type { CallNode, DiffNode } from "./types.js";
 
 /**
@@ -14,6 +15,7 @@ function diffNode(before: CallNode | null, after: CallNode | null): DiffNode {
       key: after.key,
       label: after.label,
       kind: after.kind ?? before.kind,
+      ...pickLoc(after.file ? after : before),
       status: "same",
       children: diffChildren(before.children, after.children),
     };
@@ -24,6 +26,7 @@ function diffNode(before: CallNode | null, after: CallNode | null): DiffNode {
       key: after.key,
       label: after.label,
       kind: after.kind,
+      ...pickLoc(after),
       status: "added",
       children: after.children.map(markTree("added")),
     };
@@ -34,6 +37,7 @@ function diffNode(before: CallNode | null, after: CallNode | null): DiffNode {
       key: before.key,
       label: before.label,
       kind: before.kind,
+      ...pickLoc(before),
       status: "removed",
       children: before.children.map(markTree("removed")),
     };
@@ -48,6 +52,7 @@ function markTree(status: "added" | "removed") {
       key: node.key,
       label: node.label,
       kind: node.kind,
+      ...pickLoc(node),
       status,
       children: node.children.map(mark),
     };

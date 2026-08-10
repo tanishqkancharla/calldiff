@@ -6,6 +6,7 @@ import Parser from "tree-sitter";
 import type { CallStep, FunctionInfo } from "./types.js";
 import { loadGrammarPackage, resolveLanguage } from "./languages/grammars.js";
 import { detectLanguage } from "./languages/registry.js";
+import { linesFromOffsets } from "./loc.js";
 
 const parser = new Parser();
 const languageCache = new Map<string, unknown>();
@@ -38,7 +39,11 @@ export function extractFunctions(
   );
   parser.setLanguage(language as any);
   const tree = parser.parse(source);
-  return extractor.extract(file, source, tree);
+  return extractor.extract(file, source, tree).map((fn) => {
+    if (fn.line != null) return fn;
+    const lines = linesFromOffsets(source, fn.start, fn.end);
+    return { ...fn, ...lines };
+  });
 }
 
 export type FunctionIndex = Map<string, FunctionInfo>;

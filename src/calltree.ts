@@ -1,4 +1,5 @@
 import type { FunctionIndex } from "./extract.js";
+import { pickLoc } from "./loc.js";
 import type { CallNode, CallStep } from "./types.js";
 
 function displayCallLabel(key: string, index: FunctionIndex): string {
@@ -20,6 +21,7 @@ function expandSteps(
         key: step.key,
         label: step.label,
         kind: "branch" as const,
+        ...pickLoc(step),
         children: expandSteps(
           step.children,
           index,
@@ -36,6 +38,7 @@ function expandSteps(
       maxDepth,
       visiting,
       step.children,
+      step,
     );
   });
 }
@@ -47,16 +50,23 @@ function expandCall(
   maxDepth: number,
   visiting: Set<string>,
   inlineChildren?: CallStep[],
+  callSite?: { file?: string; line?: number; endLine?: number },
 ): CallNode {
   const label = displayCallLabel(key, index);
+  const info = index.get(key);
+
+  // Root uses the definition start line; every other node uses the call-site in the parent.
+  const loc =
+    depth === 0 && info?.line != null
+      ? pickLoc({ file: info.file, line: info.line })
+      : pickLoc(callSite);
 
   if (depth >= maxDepth) {
-    return { key, label, kind: "call", children: [] };
+    return { key, label, kind: "call", ...loc, children: [] };
   }
 
-  const info = index.get(key);
   if (!info && !inlineChildren?.length) {
-    return { key, label, kind: "call", children: [] };
+    return { key, label, kind: "call", ...loc, children: [] };
   }
 
   if (info && visiting.has(key)) {
@@ -68,6 +78,7 @@ function expandCall(
       key,
       label: `${label} ⇄`,
       kind: "call",
+      ...loc,
       children: callSiteChildren,
     };
   }
@@ -85,6 +96,7 @@ function expandCall(
     key,
     label,
     kind: "call",
+    ...loc,
     children: [...bodyChildren, ...callSiteChildren],
   };
 }

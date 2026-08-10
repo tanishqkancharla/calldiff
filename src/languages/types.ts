@@ -1,5 +1,5 @@
 import type Parser from "tree-sitter";
-import type { FunctionInfo } from "../types.js";
+import type { FunctionInfo, SourceLoc } from "../types.js";
 
 export type SyntaxNode = Parser.SyntaxNode;
 export type Tree = Parser.Tree;
@@ -31,4 +31,14 @@ export function childByType(node: SyntaxNode, type: string): SyntaxNode | null {
 
 export function collapseWs(text: string): string {
   return text.replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Call-site / branch span for a syntax node.
+ * Uses tree-sitter 0-based rows → 1-based display lines.
+ */
+export function locFromNode(file: string, node: SyntaxNode): SourceLoc {
+  const line = node.startPosition.row + 1;
+  const endLine = node.endPosition.row + 1;
+  return endLine > line ? { file, line, endLine } : { file, line };
 }

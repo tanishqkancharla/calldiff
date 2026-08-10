@@ -52,7 +52,9 @@ describe("reach paths", () => {
   test("finds every path from entry to target across branches", () => {
     const index = indexOf(source);
     const paths = findReachPaths("runCheckout", "sendEmail", index, 12);
-    const ascii = paths.map((p) => renderTree(p, { color: false }));
+    const ascii = paths.map((p) =>
+      renderTree(p, { color: false, locs: false }),
+    );
 
     expect(ascii).toEqual([
       [
@@ -73,7 +75,7 @@ describe("reach paths", () => {
     const index = indexOf(source);
     const paths = findReachPaths("runCheckout", "capture", index, 12);
     expect(paths).toHaveLength(1);
-    expect(renderTree(paths[0]!, { color: false })).toBe(
+    expect(renderTree(paths[0]!, { color: false, locs: false })).toBe(
       [
         "runCheckout()",
         "└─ PaymentGateway.charge()",

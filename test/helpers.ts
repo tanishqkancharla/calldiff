@@ -7,6 +7,11 @@ export type CallstackDiffOptions = {
   maxDepth?: number;
   /** Filename used for language detection (e.g. `file.tsx`). */
   file?: string;
+  /**
+   * Include `file:line` suffixes in ASCII. Default false in unit tests
+   * so language fixtures stay focused on call structure.
+   */
+  locs?: boolean;
 };
 
 /**
@@ -92,7 +97,7 @@ export function callstackDiff(
   const beforeTree = buildCallTree(entry, before, maxDepth);
   const afterTree = buildCallTree(entry, after, maxDepth);
   const diff = diffTrees(beforeTree, afterTree);
-  return renderDiff(diff, { color: false });
+  return renderDiff(diff, { color: false, locs: options.locs === true });
 }
 
 /**
@@ -108,5 +113,5 @@ export function callstackShow(
   const file = options.file ?? "file.ts";
   const index = buildIndex(extractFunctions(file, source));
   const tree = buildCallTree(entry, index, maxDepth);
-  return renderTree(tree, { color: false });
+  return renderTree(tree, { color: false, locs: options.locs === true });
 }

@@ -31,6 +31,8 @@ export type DiffRunOptions = {
   maxDepth?: number;
   /** When false, skip ANSI colors in ascii output. Default: true */
   color?: boolean;
+  /** When false, omit file:line suffixes in ascii. Default: true */
+  locs?: boolean;
 };
 
 export type TreeRunOptions = {
@@ -40,6 +42,7 @@ export type TreeRunOptions = {
   cwd?: string;
   maxDepth?: number;
   color?: boolean;
+  locs?: boolean;
 };
 
 export type ReachRunOptions = {
@@ -52,6 +55,7 @@ export type ReachRunOptions = {
   cwd?: string;
   maxDepth?: number;
   color?: boolean;
+  locs?: boolean;
 };
 
 function loadIndex(
@@ -91,6 +95,9 @@ function serializeCallNode(node: CallNode): CallNode {
     key: node.key,
     label: node.label,
     ...(node.kind ? { kind: node.kind } : {}),
+    ...(node.file ? { file: node.file } : {}),
+    ...(node.line != null ? { line: node.line } : {}),
+    ...(node.endLine != null ? { endLine: node.endLine } : {}),
     children: node.children.map(serializeCallNode),
   };
 }
@@ -101,6 +108,9 @@ function serializeDiffNode(node: DiffNode): DiffNode {
     label: node.label,
     status: node.status,
     ...(node.kind ? { kind: node.kind } : {}),
+    ...(node.file ? { file: node.file } : {}),
+    ...(node.line != null ? { line: node.line } : {}),
+    ...(node.endLine != null ? { endLine: node.endLine } : {}),
     children: node.children.map(serializeDiffNode),
   };
 }
@@ -111,6 +121,7 @@ export function runDiff(options: DiffRunOptions = {}): DiffResult {
   const maxDepth = options.maxDepth ?? 12;
   const entriesOpt = options.entries ?? [];
   const color = options.color !== false;
+  const locs = options.locs !== false;
 
   assertGitRepo(cwd);
 
@@ -156,10 +167,10 @@ export function runDiff(options: DiffRunOptions = {}): DiffResult {
   for (const entry of entries) {
     const diff = diffEntry(entry, before, after, maxDepth);
     if (!diff) continue;
-    const ascii = renderDiff(diff, { color });
+    const ascii = renderDiff(diff, { color, locs });
     trees.push({
       entry,
-      ascii: renderDiff(diff, { color: false }),
+      ascii: renderDiff(diff, { color: false, locs }),
       tree: serializeDiffNode(diff),
     });
     if (asciiParts.length > 2) asciiParts.push("");
@@ -192,6 +203,7 @@ export function runTree(options: TreeRunOptions): TreeResult {
   const cwd = options.cwd ?? process.cwd();
   const maxDepth = options.maxDepth ?? 12;
   const color = options.color !== false;
+  const locs = options.locs !== false;
 
   assertGitRepo(cwd);
 
@@ -211,10 +223,10 @@ export function runTree(options: TreeRunOptions): TreeResult {
 
   for (const entry of entries) {
     const tree = buildCallTree(entry, index, maxDepth);
-    const ascii = renderTree(tree, { color });
+    const ascii = renderTree(tree, { color, locs });
     trees.push({
       entry,
-      ascii: renderTree(tree, { color: false }),
+      ascii: renderTree(tree, { color: false, locs }),
       tree: serializeCallNode(tree),
     });
     if (asciiParts.length > 2) asciiParts.push("");
@@ -234,6 +246,7 @@ export function runReach(options: ReachRunOptions): ReachResult {
   const cwd = options.cwd ?? process.cwd();
   const maxDepth = options.maxDepth ?? 12;
   const color = options.color !== false;
+  const locs = options.locs !== false;
 
   assertGitRepo(cwd);
 
@@ -257,7 +270,7 @@ export function runReach(options: ReachRunOptions): ReachResult {
     const found = findReachPaths(entry, targetKey, index, maxDepth);
     for (const path of found) {
       pathResults.push({
-        ascii: renderTree(path, { color: false }),
+        ascii: renderTree(path, { color: false, locs }),
         tree: serializeCallNode(path),
       });
     }
@@ -287,7 +300,7 @@ export function runReach(options: ReachRunOptions): ReachResult {
     if (pathResults.length > 1) {
       asciiParts.push(`# path ${i + 1}`);
     }
-    asciiParts.push(renderTree(path.tree, { color }));
+    asciiParts.push(renderTree(path.tree, { color, locs }));
   }
 
   return {

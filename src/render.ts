@@ -1,5 +1,6 @@
 import pc from "picocolors";
-import type { CallNode, DiffNode, DiffStatus } from "./types.js";
+import { formatSourceLoc, pickLoc } from "./loc.js";
+import type { CallNode, DiffNode, DiffStatus, SourceLoc } from "./types.js";
 
 function paint(status: DiffStatus, text: string): string {
   switch (status) {
@@ -26,6 +27,11 @@ function prefix(status: DiffStatus): string {
 export interface RenderOptions {
   /** When false, skip ANSI colors (useful for tests). Default: true */
   color?: boolean;
+  /**
+   * Append `file:line` (or `file:line-line`) after each label.
+   * Default: true.
+   */
+  locs?: boolean;
 }
 
 type TreeLike = {
@@ -33,6 +39,9 @@ type TreeLike = {
   kind?: CallNode["kind"];
   children: TreeLike[];
   status?: DiffStatus;
+  file?: string;
+  line?: number;
+  endLine?: number;
 };
 
 function renderAsciiTree(
@@ -41,6 +50,7 @@ function renderAsciiTree(
   withStatus: boolean,
 ): string {
   const useColor = options.color !== false;
+  const showLocs = options.locs !== false;
 
   const paintStatus = (status: DiffStatus, text: string): string =>
     useColor ? paint(status, text) : text;
@@ -59,6 +69,14 @@ function renderAsciiTree(
     return prefix(status);
   };
 
+  const locSuffix = (node: TreeLike): string => {
+    if (!showLocs) return "";
+    const loc = pickLoc(node);
+    if (!loc.file || loc.line == null) return "";
+    const text = `  ${formatSourceLoc(loc as SourceLoc)}`;
+    return useColor ? pc.dim(text) : text;
+  };
+
   const lines: string[] = [];
 
   const walk = (
@@ -71,9 +89,10 @@ function renderAsciiTree(
     const label = withStatus
       ? paintStatus(node.status ?? "same", node.label)
       : node.label;
+    const suffix = locSuffix(node);
     const line = withStatus
-      ? `${statusPrefix(node.status ?? "same")} ${indent}${branch}${label}`
-      : `${indent}${branch}${label}`;
+      ? `${statusPrefix(node.status ?? "same")} ${indent}${branch}${label}${suffix}`
+      : `${indent}${branch}${label}${suffix}`;
     lines.push(line);
 
     // Conditional arms omit the continuing │ rail — they are alternate paths,

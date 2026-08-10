@@ -5,6 +5,7 @@ import type { CallStep, FunctionInfo } from "../types.js";
 import {
   childByType,
   collapseWs,
+  locFromNode,
   namedChildren,
   type LanguageExtractor,
   type SyntaxNode,
@@ -135,17 +136,18 @@ function statementsOf(node: SyntaxNode): SyntaxNode[] {
 }
 
 function collectStatements(
+  file: string,
   statements: SyntaxNode[],
   className: string | null,
 ): CallStep[] {
   const steps: CallStep[] = [];
   const seenCalls = new Set<string>();
 
-  const addCall = (key: string, startIndex: number) => {
-    const mark = `${key}:${startIndex}`;
+  const addCall = (key: string, node: SyntaxNode) => {
+    const mark = `${key}:${node.startIndex}`;
     if (seenCalls.has(mark)) return;
     seenCalls.add(mark);
-    steps.push({ type: "call", key });
+    steps.push({ type: "call", key, ...locFromNode(file, node) });
   };
 
   const walkExpr = (node: SyntaxNode): void => {
@@ -173,8 +175,9 @@ function collectStatements(
         type: "branch",
         key: branchKey("if", cond),
         label: test ? `if (${condText(test)})` : "if",
+        ...locFromNode(file, test ?? node),
         children: consequent
-          ? collectStatements(statementsOf(consequent), className)
+          ? collectStatements(file, statementsOf(consequent), className)
           : [],
       });
 
@@ -198,8 +201,9 @@ function collectStatements(
             type: "branch",
             key: branchKey("else-if", elseCond),
             label: elseTest ? `else if (${condText(elseTest)})` : "else if",
+            ...locFromNode(file, elseTest ?? current),
             children: elseConsequent
-              ? collectStatements(statementsOf(elseConsequent), className)
+              ? collectStatements(file, statementsOf(elseConsequent), className)
               : [],
           });
           current = childByType(inner, "else_clause");
@@ -210,7 +214,8 @@ function collectStatements(
           type: "branch",
           key: branchKey("else", ""),
           label: "else",
-          children: collectStatements(statementsOf(inner), className),
+          ...locFromNode(file, current),
+          children: collectStatements(file, statementsOf(inner), className),
         });
         break;
       }
@@ -221,14 +226,14 @@ function collectStatements(
       const callee = node.namedChild(0);
       if (callee) {
         const key = calleeKey(callee, className);
-        if (key) addCall(key, node.startIndex);
+        if (key) addCall(key, node);
       }
     } else if (type === "new_expression") {
       const callee = node.namedChild(0);
       if (callee) {
         const key = calleeKey(callee, null);
         if (key) {
-          addCall(key.startsWith("new ") ? key : `new ${key}`, node.startIndex);
+          addCall(key.startsWith("new ") ? key : `new ${key}`, node);
         }
       }
     } else if (type === "jsx_element") {
@@ -244,21 +249,26 @@ function collectStatements(
             attr.type === "jsx_attribute" ||
             attr.type === "jsx_expression"
           ) {
-            fromAttrs.push(...collectStatements([attr], className));
+            fromAttrs.push(...collectStatements(file, [attr], className));
           }
         }
       }
       const nested = [
         ...fromAttrs,
-        ...collectStatements(childNodes, className),
+        ...collectStatements(file, childNodes, className),
       ];
       if (opening) {
         const key = jsxCalleeKey(opening);
         if (key) {
           if (nested.length > 0) {
-            steps.push({ type: "call", key, children: nested });
+            steps.push({
+              type: "call",
+              key,
+              ...locFromNode(file, opening),
+              children: nested,
+            });
           } else {
-            addCall(key, opening.startIndex);
+            addCall(key, opening);
           }
           return;
         }
@@ -269,13 +279,18 @@ function collectStatements(
       const attrNodes = namedChildren(node).filter(
         (c) => c.type === "jsx_attribute" || c.type === "jsx_expression",
       );
-      const nested = collectStatements(attrNodes, className);
+      const nested = collectStatements(file, attrNodes, className);
       const key = jsxCalleeKey(node);
       if (key) {
         if (nested.length > 0) {
-          steps.push({ type: "call", key, children: nested });
+          steps.push({
+            type: "call",
+            key,
+            ...locFromNode(file, node),
+            children: nested,
+          });
         } else {
-          addCall(key, node.startIndex);
+          addCall(key, node);
         }
       } else {
         for (const step of nested) steps.push(step);
@@ -296,14 +311,15 @@ function collectStatements(
 }
 
 function collectStepsFromBody(
+  file: string,
   body: SyntaxNode | null,
   className: string | null,
 ): CallStep[] {
   if (!body) return [];
   if (body.type === "statement_block") {
-    return collectStatements(namedChildren(body), className);
+    return collectStatements(file, namedChildren(body), className);
   }
-  return collectStatements([body], className);
+  return collectStatements(file, [body], className);
 }
 
 function functionFromParts(
@@ -322,7 +338,7 @@ function functionFromParts(
     key,
     label: `${label}${paramsLabel}`,
     file,
-    steps: collectStepsFromBody(body, className),
+    steps: collectStepsFromBody(file, body, className),
     exported,
     start,
     end,

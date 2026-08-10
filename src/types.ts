@@ -1,5 +1,14 @@
 export type CallNodeKind = "call" | "branch";
 
+/** Source location as shown in editors: `file:line` or `file:line-line`. */
+export interface SourceLoc {
+  file: string;
+  /** 1-based start line */
+  line: number;
+  /** 1-based end line when the span covers multiple lines */
+  endLine?: number;
+}
+
 export interface CallNode {
   /** Stable identity used for matching across versions, e.g. "PiService.createAgentSession" */
   key: string;
@@ -7,6 +16,13 @@ export interface CallNode {
   label: string;
   /** Branches omit the continuing │ rail so arms read as alternate paths */
   kind?: CallNodeKind;
+  /**
+   * Root: definition location. Children: call-site (or branch keyword) in the parent.
+   * Matching/diff keys ignore these fields.
+   */
+  file?: string;
+  line?: number;
+  endLine?: number;
   children: CallNode[];
 }
 
@@ -15,6 +31,10 @@ export type CallStep =
   | {
       type: "call";
       key: string;
+      /** Call-expression span in the caller file. */
+      file?: string;
+      line?: number;
+      endLine?: number;
       /** Inline children (e.g. JSX component children at the call site). */
       children?: CallStep[];
     }
@@ -22,6 +42,10 @@ export type CallStep =
       type: "branch";
       key: string;
       label: string;
+      /** Branch keyword / condition span. */
+      file?: string;
+      line?: number;
+      endLine?: number;
       children: CallStep[];
     };
 
@@ -32,6 +56,9 @@ export interface DiffNode {
   label: string;
   status: DiffStatus;
   kind?: CallNodeKind;
+  file?: string;
+  line?: number;
+  endLine?: number;
   children: DiffNode[];
 }
 
@@ -46,6 +73,9 @@ export interface FunctionInfo {
   /** Source span for change detection */
   start: number;
   end: number;
+  /** 1-based definition line (derived from start/end + source) */
+  line?: number;
+  endLine?: number;
 }
 
 export interface Snapshot {

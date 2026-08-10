@@ -75,6 +75,11 @@ const maxDepthOption = z.coerce
   .default(12)
   .describe("Max call-tree depth");
 
+const locsOption = z
+  .boolean()
+  .default(true)
+  .describe("Show call-site source locations (file:line)");
+
 const pathsArg = z
   .array(z.string())
   .optional()
@@ -105,6 +110,7 @@ export const cli = Cli.create("calldiff", {
     options: z.object({
       entry: entryOption.optional(),
       maxDepth: maxDepthOption,
+      locs: locsOption,
       from: z.string().optional().describe('Left / "before" tree'),
       to: z.string().optional().describe('Right / "after" tree'),
     }),
@@ -145,6 +151,7 @@ export const cli = Cli.create("calldiff", {
           entries,
           paths: c.args.paths,
           maxDepth: c.options.maxDepth,
+          locs: c.options.locs,
           color: !c.formatExplicit && !c.agent,
         });
       } catch (error) {
@@ -183,6 +190,7 @@ export const cli = Cli.create("calldiff", {
     options: z.object({
       entry: entryOption,
       maxDepth: maxDepthOption,
+      locs: locsOption,
     }),
     alias: { entry: "e" },
     examples: [
@@ -212,6 +220,7 @@ export const cli = Cli.create("calldiff", {
           entries,
           paths: c.args.paths,
           maxDepth: c.options.maxDepth,
+          locs: c.options.locs,
           color: !c.formatExplicit && !c.agent,
         });
         return emitAsciiOrData(c, result);
@@ -239,6 +248,7 @@ export const cli = Cli.create("calldiff", {
         .string()
         .describe("Target symbol to reach (functionName or ClassName.method)"),
       maxDepth: maxDepthOption,
+      locs: locsOption,
     }),
     alias: { entry: "e" },
     examples: [
@@ -276,6 +286,7 @@ export const cli = Cli.create("calldiff", {
           to: c.options.to,
           paths: c.args.paths,
           maxDepth: c.options.maxDepth,
+          locs: c.options.locs,
           color: !c.formatExplicit && !c.agent,
         });
         return emitAsciiOrData(c, result);

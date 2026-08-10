@@ -14,6 +14,7 @@ Helpers: `namedChildren`, `childByType`, `collapseWs` from `./types.js`.
 - `key`: stable id (`foo`, `Type.method`, `new Type`)
 - `label`: display with params (`foo(x)`, `Type.method()`)
 - `steps`: ordered `call` | `branch` (`if`/`else`/`elif`/language equivalent)
+- Call and branch steps should include call-site / keyword locs via `locFromNode(file, node)` → `file`, `line`, optional `endLine` (1-based)
 - `exported`: used for entry inference
 
 ## Must support
