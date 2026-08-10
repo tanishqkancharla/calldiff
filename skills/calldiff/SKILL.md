@@ -1,6 +1,6 @@
 ---
 name: calldiff
-description: Diff call stacks across git commits for agentic code review (22 languages). Run `calldiff --help` for usage details.
+description: Diff call stacks across git commits — like git diff, but for who-calls-whom. Shows which callees appeared, disappeared, or moved under an entrypoint across 22 languages (diff, tree, and reach). Use for agentic code review when call flow changed and line diffs bury the shape of the change.
 requires_bin: calldiff
 command: calldiff
 ---
