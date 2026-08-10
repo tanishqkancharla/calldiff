@@ -241,3 +241,95 @@ test("rust: Type::method scoped calls and ignores bare field reads", ({
     + └─ obj.other()
   `);
 });
+
+test("rust: trait-typed parameter resolves method calls to Trait.method", ({
+  expectCallstack,
+}) => {
+  expectCallstack(
+    `
+      fn run(model: &dyn LanguageModel) {
+          model.do_generate();
+    +     model.do_stream();
+      }
+
+      trait LanguageModel {
+          fn do_generate(&self);
+          fn do_stream(&self);
+      }
+
+      impl LanguageModel for OpenAIModel {
+          fn do_generate(&self) {
+              build_headers();
+              send();
+          }
+          fn do_stream(&self) {
+              send_stream();
+          }
+      }
+      fn build_headers() {}
+      fn send() {}
+    + fn send_stream() {}
+    `,
+    "run",
+    { file: "trait_param.rs" },
+  ).toEqual(`
+      run(model)
+      ├─ LanguageModel.do_generate(self)
+      │  ├─ build_headers()
+      │  └─ send()
+    + └─ LanguageModel.do_stream(self)
+    +    └─ send_stream()
+  `);
+});
+
+test("rust: impl Trait for Type indexes methods under the trait name too", ({
+  expectCallstack,
+}) => {
+  expectCallstack(
+    `
+      fn run(model: impl LanguageModel) {
+          model.do_generate();
+      }
+
+      impl LanguageModel for OpenAIModel {
+          fn do_generate(&self) {
+              build_headers();
+    +         send();
+          }
+      }
+      fn build_headers() {}
+    + fn send() {}
+    `,
+    "LanguageModel.do_generate",
+    { file: "trait_impl.rs" },
+  ).toEqual(`
+      LanguageModel.do_generate(self)
+      ├─ build_headers()
+    + └─ send()
+  `);
+});
+
+test("rust: Arc<dyn Trait> parameter type also resolves trait calls", ({
+  expectCallstack,
+}) => {
+  expectCallstack(
+    `
+      fn run(model: Arc<dyn LanguageModel>) {
+          model.do_generate();
+      }
+
+      impl LanguageModel for OpenAIModel {
+          fn do_generate(&self) {
+    +         send();
+          }
+      }
+    + fn send() {}
+    `,
+    "run",
+    { file: "trait_arc.rs" },
+  ).toEqual(`
+      run(model)
+      └─ LanguageModel.do_generate(self)
+    +    └─ send()
+  `);
+});

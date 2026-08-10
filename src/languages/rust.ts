@@ -36,7 +36,50 @@ function getParamsLabel(params: SyntaxNode | null): string {
   return names.length === 0 ? "()" : `(${names.join(", ")})`;
 }
 
-function calleeKey(node: SyntaxNode, typeName: string | null): string | null {
+/**
+ * Trait-typed parameter names → trait name, e.g. `model: &dyn LanguageModel`
+ * maps `model` to `LanguageModel`. Only parameters whose type mentions `dyn`
+ * (`dynamic_type`) or `impl` (`abstract_type`) qualify — a concrete type
+ * (e.g. `&OpenAIModel`) does not, since the variable's concrete type is
+ * unknown at the call site.
+ */
+function getTraitParamTypes(params: SyntaxNode | null): Map<string, string> {
+  const map = new Map<string, string>();
+  if (!params) return map;
+
+  const collectTypeIds = (node: SyntaxNode): string[] => {
+    const ids: string[] = [];
+    for (const c of namedChildren(node)) {
+      if (c.type === "type_identifier") ids.push(c.text);
+      else ids.push(...collectTypeIds(c));
+    }
+    return ids;
+  };
+
+  const hasTraitKind = (node: SyntaxNode): boolean =>
+    node.type === "dynamic_type" ||
+    node.type === "abstract_type" ||
+    namedChildren(node).some(hasTraitKind);
+
+  for (const p of namedChildren(params)) {
+    if (p.type !== "parameter") continue;
+    const ident = namedChildren(p).find((c) => c.type === "identifier");
+    // The type is the parameter's last named child; tree-sitter-rust types
+    // it as `reference_type` / `generic_type` / `abstract_type`, not `type`.
+    const type = namedChildren(p).at(-1) ?? null;
+    if (!ident || !type || !hasTraitKind(type)) continue;
+    const typeIds = collectTypeIds(type);
+    const trait = typeIds.at(-1);
+    if (trait) map.set(ident.text, trait);
+  }
+  return map;
+}
+
+function calleeKey(
+  node: SyntaxNode,
+  typeName: string | null,
+  paramTypes: Map<string, string>,
+): string | null {
   if (node.type === "identifier") return node.text;
 
   if (node.type === "field_expression") {
@@ -49,6 +92,8 @@ function calleeKey(node: SyntaxNode, typeName: string | null): string | null {
     }
     if (object.type === "identifier") {
       const objName = object.text;
+      const traitName = paramTypes.get(objName);
+      if (traitName) return `${traitName}.${prop}`;
       if (
         typeName &&
         objName[0] &&
@@ -99,6 +144,7 @@ function statementsOf(node: SyntaxNode): SyntaxNode[] {
 function collectStatements(
   statements: SyntaxNode[],
   typeName: string | null,
+  paramTypes: Map<string, string>,
 ): CallStep[] {
   const steps: CallStep[] = [];
   const seen = new Set<string>();
@@ -125,7 +171,7 @@ function collectStatements(
       key: condText ? `${kind}:${condText}` : kind,
       label: condText ? `${labelKind} ${condText}` : labelKind,
       children: thenBlock
-        ? collectStatements(statementsOf(thenBlock), typeName)
+        ? collectStatements(statementsOf(thenBlock), typeName, paramTypes)
         : [],
     });
 
@@ -142,7 +188,7 @@ function collectStatements(
       type: "branch",
       key: "else",
       label: "else",
-      children: collectStatements(statementsOf(elseInner), typeName),
+      children: collectStatements(statementsOf(elseInner), typeName, paramTypes),
     });
   };
 
@@ -187,7 +233,7 @@ function collectStatements(
           key: text ? `case:${text}` : "case",
           label: text ? `case ${text}` : "case",
           children: body
-            ? collectStatements(statementsOf(body), typeName)
+            ? collectStatements(statementsOf(body), typeName, paramTypes)
             : [],
         });
       }
@@ -197,7 +243,7 @@ function collectStatements(
     if (node.type === "call_expression") {
       const callee = node.namedChild(0);
       if (callee) {
-        const key = calleeKey(callee, typeName);
+        const key = calleeKey(callee, typeName, paramTypes);
         if (key) addCall(key, node.startIndex);
       }
     }
@@ -214,6 +260,7 @@ function handleFunctionItem(
   node: SyntaxNode,
   typeName: string | null,
   functions: FunctionInfo[],
+  traitName: string | null = null,
 ) {
   const name = childByType(node, "identifier")?.text ?? null;
   if (!name) return;
@@ -228,12 +275,13 @@ function handleFunctionItem(
     : name;
   const labelBase = isNew ? `new ${typeName}` : key;
   const exported = isPublic(node) || !name.startsWith("_");
+  const paramTypes = getTraitParamTypes(params);
 
   const info: FunctionInfo = {
     key,
     label: `${labelBase}${getParamsLabel(params)}`,
     file,
-    steps: body ? collectStatements(statementsOf(body), typeName) : [],
+    steps: body ? collectStatements(statementsOf(body), typeName, paramTypes) : [],
     exported,
     start: node.startIndex,
     end: node.endIndex,
@@ -247,6 +295,18 @@ function handleFunctionItem(
       label: `new ${typeName}${getParamsLabel(params)}`,
     });
   }
+
+  // `impl Trait for Type`: also index the method under the trait name, so a
+  // call through a trait-typed variable (e.g. `model.do_generate()` where
+  // `model: &dyn LanguageModel`) can resolve to an implementation.
+  if (traitName) {
+    const traitKey = `${traitName}.${name}`;
+    functions.push({
+      ...info,
+      key: traitKey,
+      label: `${traitKey}${getParamsLabel(params)}`,
+    });
+  }
 }
 
 function handleImpl(
@@ -255,16 +315,21 @@ function handleImpl(
   functions: FunctionInfo[],
 ) {
   const typeIds = namedChildren(node).filter((c) => c.type === "type_identifier");
-  // `impl Foo` → one type_identifier; `impl Trait for Foo` → last is the type
+  // `impl Foo` → one type_identifier; `impl Trait for Foo` → [Trait, Foo],
+  // last is the type, first (when more than one) is the trait.
   const typeName = typeIds.at(-1)?.text ?? null;
   if (!typeName) return;
+  const traitName =
+    typeIds.length > 1 && typeIds[0]!.text !== typeName
+      ? typeIds[0]!.text
+      : null;
 
   const list = childByType(node, "declaration_list");
   if (!list) return;
 
   for (const item of namedChildren(list)) {
     if (item.type === "function_item") {
-      handleFunctionItem(file, item, typeName, functions);
+      handleFunctionItem(file, item, typeName, functions, traitName);
     }
   }
 }
