@@ -5,6 +5,7 @@ import type { CallStep, FunctionInfo } from "../types.js";
 import {
   childByType,
   collapseWs,
+  locFromNode,
   namedChildren,
   type LanguageExtractor,
   type SyntaxNode,
@@ -77,17 +78,18 @@ function statementsOf(body: SyntaxNode | null): SyntaxNode[] {
 }
 
 function collectStatements(
+  file: string,
   statements: SyntaxNode[],
   className: string | null,
 ): CallStep[] {
   const steps: CallStep[] = [];
   const seen = new Set<string>();
 
-  const addCall = (key: string, start: number) => {
-    const mark = `${key}:${start}`;
+  const addCall = (key: string, node: SyntaxNode) => {
+    const mark = `${key}:${node.startIndex}`;
     if (seen.has(mark)) return;
     seen.add(mark);
-    steps.push({ type: "call", key });
+    steps.push({ type: "call", key, ...locFromNode(file, node) });
   };
 
   const pushIfChain = (node: SyntaxNode, asElseIf: boolean): void => {
@@ -103,7 +105,12 @@ function collectStatements(
       type: "branch",
       key: condText ? `${kind}:${condText}` : kind,
       label: condText ? `${labelKind} ${condText}` : labelKind,
-      children: collectStatements(statementsOf(bodies[0] ?? null), className),
+      ...locFromNode(file, cond ?? node),
+      children: collectStatements(
+        file,
+        statementsOf(bodies[0] ?? null),
+        className,
+      ),
     });
 
     if (!bodies[1]) return;
@@ -118,7 +125,8 @@ function collectStatements(
       type: "branch",
       key: "else",
       label: "else",
-      children: collectStatements(elseStmts, className),
+      ...locFromNode(file, bodies[1]),
+      children: collectStatements(file, elseStmts, className),
     });
   };
 
@@ -147,8 +155,9 @@ function collectStatements(
         type: "branch",
         key: "try",
         label: "try",
+        ...locFromNode(file, node),
         children: tryStmts
-          ? collectStatements(namedChildren(tryStmts), className)
+          ? collectStatements(file, namedChildren(tryStmts), className)
           : [],
       });
       for (const clause of namedChildren(node)) {
@@ -166,8 +175,9 @@ function collectStatements(
             type: "branch",
             key: text ? `catch:${text}` : "catch",
             label: text ? `catch ${text}` : "catch",
+            ...locFromNode(file, type ?? clause),
             children: body
-              ? collectStatements(namedChildren(body), className)
+              ? collectStatements(file, namedChildren(body), className)
               : [],
           });
         }
@@ -177,8 +187,9 @@ function collectStatements(
             type: "branch",
             key: "finally",
             label: "finally",
+            ...locFromNode(file, clause),
             children: body
-              ? collectStatements(namedChildren(body), className)
+              ? collectStatements(file, namedChildren(body), className)
               : [],
           });
         }
@@ -197,14 +208,16 @@ function collectStatements(
             type: "branch",
             key: text ? `case:${text}` : "case",
             label: text ? `case ${text}` : "case",
-            children: collectStatements(statementsOf(body), className),
+            ...locFromNode(file, cond),
+            children: collectStatements(file, statementsOf(body), className),
           });
         } else {
           steps.push({
             type: "branch",
             key: "else",
             label: "else",
-            children: collectStatements(statementsOf(body), className),
+            ...locFromNode(file, entry),
+            children: collectStatements(file, statementsOf(body), className),
           });
         }
       }
@@ -215,7 +228,7 @@ function collectStatements(
       const callee = node.namedChild(0);
       if (callee) {
         const key = calleeKey(callee, className);
-        if (key) addCall(key, node.startIndex);
+        if (key) addCall(key, node);
       }
       for (const child of namedChildren(node).slice(1)) walk(child);
       return;
@@ -243,7 +256,7 @@ function handleFunction(
     key,
     label: `${key}${getParamsLabel(params)}`,
     file,
-    steps: collectStatements(statementsOf(body), className),
+    steps: collectStatements(file, statementsOf(body), className),
     exported: !isPrivate(node),
     start: node.startIndex,
     end: node.endIndex,
@@ -262,7 +275,7 @@ function handleSecondaryConstructor(
     key: `${className}.constructor`,
     label: `${className}${getParamsLabel(params)}`,
     file,
-    steps: collectStatements(stmts ? namedChildren(stmts) : [], className),
+    steps: collectStatements(file, stmts ? namedChildren(stmts) : [], className),
     exported: !isPrivate(node),
     start: node.startIndex,
     end: node.endIndex,
@@ -282,7 +295,7 @@ function handleInitBlock(
     key: `${className}.init`,
     label: `${className}()`,
     file,
-    steps: collectStatements(stmts ? namedChildren(stmts) : [], className),
+    steps: collectStatements(file, stmts ? namedChildren(stmts) : [], className),
     exported: true,
     start: node.startIndex,
     end: node.endIndex,

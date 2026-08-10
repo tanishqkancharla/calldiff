@@ -5,6 +5,7 @@ import type { CallStep, FunctionInfo } from "../types.js";
 import {
   childByType,
   collapseWs,
+  locFromNode,
   namedChildren,
   type LanguageExtractor,
   type SyntaxNode,
@@ -97,15 +98,15 @@ function condText(node: SyntaxNode | null): string {
   return collapseWs(node.text);
 }
 
-function collectStatements(statements: SyntaxNode[]): CallStep[] {
+function collectStatements(file: string, statements: SyntaxNode[]): CallStep[] {
   const steps: CallStep[] = [];
   const seen = new Set<string>();
 
-  const addCall = (key: string, start: number) => {
-    const mark = `${key}:${start}`;
+  const addCall = (key: string, node: SyntaxNode) => {
+    const mark = `${key}:${node.startIndex}`;
     if (seen.has(mark)) return;
     seen.add(mark);
-    steps.push({ type: "call", key });
+    steps.push({ type: "call", key, ...locFromNode(file, node) });
   };
 
   const walk = (node: SyntaxNode): void => {
@@ -127,7 +128,8 @@ function collectStatements(statements: SyntaxNode[]): CallStep[] {
         type: "branch",
         key: text ? `if:${text}` : "if",
         label: text ? `if ${text}` : "if",
-        children: consequent ? collectStatements([consequent]) : [],
+        ...locFromNode(file, cond ?? node),
+        children: consequent ? collectStatements(file, [consequent]) : [],
       });
 
       let elseClause = childByType(node, "else_clause");
@@ -151,7 +153,8 @@ function collectStatements(statements: SyntaxNode[]): CallStep[] {
             type: "branch",
             key: elifText ? `else-if:${elifText}` : "else-if",
             label: elifText ? `else if ${elifText}` : "else if",
-            children: elifCons ? collectStatements([elifCons]) : [],
+            ...locFromNode(file, elifCond ?? elseClause),
+            children: elifCons ? collectStatements(file, [elifCons]) : [],
           });
           elseClause = childByType(inner, "else_clause");
           continue;
@@ -160,7 +163,8 @@ function collectStatements(statements: SyntaxNode[]): CallStep[] {
           type: "branch",
           key: "else",
           label: "else",
-          children: collectStatements([inner]),
+          ...locFromNode(file, elseClause),
+          children: collectStatements(file, [inner]),
         });
         break;
       }
@@ -184,14 +188,16 @@ function collectStatements(statements: SyntaxNode[]): CallStep[] {
               type: "branch",
               key: `case:${text}`,
               label: `case ${text}`,
-              children: collectStatements(kids),
+              ...locFromNode(file, value),
+              children: collectStatements(file, kids),
             });
           } else {
             steps.push({
               type: "branch",
               key: "default",
               label: "default",
-              children: collectStatements(kids),
+              ...locFromNode(file, clause),
+              children: collectStatements(file, kids),
             });
           }
         }
@@ -203,7 +209,7 @@ function collectStatements(statements: SyntaxNode[]): CallStep[] {
       const callee = node.namedChild(0);
       if (callee) {
         const key = calleeKey(callee);
-        if (key) addCall(key, node.startIndex);
+        if (key) addCall(key, node);
       }
     }
 
@@ -226,7 +232,7 @@ function handleFunction(
     key: name,
     label: `${name}${getParamsLabel(node)}`,
     file,
-    steps: body ? collectStatements(namedChildren(body)) : [],
+    steps: body ? collectStatements(file, namedChildren(body)) : [],
     exported: !hasStatic(node),
     start: node.startIndex,
     end: node.endIndex,

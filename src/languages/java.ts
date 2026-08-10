@@ -5,6 +5,7 @@ import type { CallStep, FunctionInfo } from "../types.js";
 import {
   childByType,
   collapseWs,
+  locFromNode,
   namedChildren,
   type LanguageExtractor,
   type SyntaxNode,
@@ -79,17 +80,18 @@ function statementsOf(node: SyntaxNode): SyntaxNode[] {
 }
 
 function collectStatements(
+  file: string,
   statements: SyntaxNode[],
   className: string | null,
 ): CallStep[] {
   const steps: CallStep[] = [];
   const seen = new Set<string>();
 
-  const addCall = (key: string, start: number) => {
-    const mark = `${key}:${start}`;
+  const addCall = (key: string, node: SyntaxNode) => {
+    const mark = `${key}:${node.startIndex}`;
     if (seen.has(mark)) return;
     seen.add(mark);
-    steps.push({ type: "call", key });
+    steps.push({ type: "call", key, ...locFromNode(file, node) });
   };
 
   const walk = (node: SyntaxNode): void => {
@@ -128,8 +130,9 @@ function collectStatements(
         type: "branch",
         key: condText ? `if:${condText}` : "if",
         label: condText ? `if (${condText})` : "if",
+        ...locFromNode(file, condInner ?? node),
         children: consequent
-          ? collectStatements(statementsOf(consequent), className)
+          ? collectStatements(file, statementsOf(consequent), className)
           : [],
       });
 
@@ -140,14 +143,15 @@ function collectStatements(
           type: "branch",
           key: "else",
           label: "else",
-          children: collectStatements(statementsOf(alternate), className),
+          ...locFromNode(file, alternate),
+          children: collectStatements(file, statementsOf(alternate), className),
         });
       } else {
         // Look for else-if: a trailing if_statement child
         const elseIf = kids.find((c) => c.type === "if_statement");
         if (elseIf) {
           // Flatten: treat nested if as else-if / else chain
-          const nested = collectStatements([elseIf], className);
+          const nested = collectStatements(file, [elseIf], className);
           for (const step of nested) {
             if (step.type === "branch" && step.key.startsWith("if:")) {
               steps.push({
@@ -170,8 +174,9 @@ function collectStatements(
         type: "branch",
         key: "try",
         label: "try",
+        ...locFromNode(file, node),
         children: tryBlock
-          ? collectStatements(statementsOf(tryBlock), className)
+          ? collectStatements(file, statementsOf(tryBlock), className)
           : [],
       });
       for (const clause of namedChildren(node)) {
@@ -195,8 +200,9 @@ function collectStatements(
             type: "branch",
             key: text ? `catch:${text}` : "catch",
             label: text ? `catch (${text})` : "catch",
+            ...locFromNode(file, typeNode ?? clause),
             children: block
-              ? collectStatements(statementsOf(block), className)
+              ? collectStatements(file, statementsOf(block), className)
               : [],
           });
         }
@@ -206,8 +212,9 @@ function collectStatements(
             type: "branch",
             key: "finally",
             label: "finally",
+            ...locFromNode(file, clause),
             children: block
-              ? collectStatements(statementsOf(block), className)
+              ? collectStatements(file, statementsOf(block), className)
               : [],
           });
         }
@@ -239,7 +246,8 @@ function collectStatements(
                 type: "branch",
                 key: "default",
                 label: "default",
-                children: collectStatements(stmts, className),
+                ...locFromNode(file, label),
+                children: collectStatements(file, stmts, className),
               });
             } else {
               const value = label.namedChild(0);
@@ -248,7 +256,8 @@ function collectStatements(
                 type: "branch",
                 key: text ? `case:${text}` : "case",
                 label: text ? `case ${text}` : "case",
-                children: collectStatements(stmts, className),
+                ...locFromNode(file, value ?? label),
+                children: collectStatements(file, stmts, className),
               });
             }
           }
@@ -261,13 +270,14 @@ function collectStatements(
           const isDefault =
             label.namedChildCount === 0 || /\bdefault\b/.test(label.text);
           const children = bodyNode
-            ? collectStatements(statementsOf(bodyNode), className)
+            ? collectStatements(file, statementsOf(bodyNode), className)
             : [];
           if (isDefault) {
             steps.push({
               type: "branch",
               key: "default",
               label: "default",
+              ...locFromNode(file, label),
               children,
             });
           } else {
@@ -277,6 +287,7 @@ function collectStatements(
               type: "branch",
               key: text ? `case:${text}` : "case",
               label: text ? `case ${text}` : "case",
+              ...locFromNode(file, value ?? label),
               children,
             });
           }
@@ -287,7 +298,7 @@ function collectStatements(
 
     if (node.type === "method_invocation") {
       const key = methodInvocationKey(node, className);
-      if (key) addCall(key, node.startIndex);
+      if (key) addCall(key, node);
     } else if (node.type === "object_creation_expression") {
       const typeId =
         childByType(node, "type_identifier") ??
@@ -296,7 +307,7 @@ function collectStatements(
         typeId?.type === "type_identifier"
           ? typeId.text
           : childByType(typeId ?? node, "type_identifier")?.text;
-      if (name) addCall(`new ${name}`, node.startIndex);
+      if (name) addCall(`new ${name}`, node);
     }
 
     for (const child of namedChildren(node)) walk(child);
@@ -321,7 +332,7 @@ function handleMethod(
     key,
     label: `${key}${getParamsLabel(params)}`,
     file,
-    steps: body ? collectStatements(statementsOf(body), className) : [],
+    steps: body ? collectStatements(file, statementsOf(body), className) : [],
     exported: !isPrivate(node),
     start: node.startIndex,
     end: node.endIndex,
@@ -340,7 +351,7 @@ function handleConstructor(
     key: `${className}.constructor`,
     label: `new ${className}${getParamsLabel(params)}`,
     file,
-    steps: body ? collectStatements(statementsOf(body), className) : [],
+    steps: body ? collectStatements(file, statementsOf(body), className) : [],
     exported: !isPrivate(node),
     start: node.startIndex,
     end: node.endIndex,

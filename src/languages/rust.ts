@@ -5,6 +5,7 @@ import type { CallStep, FunctionInfo } from "../types.js";
 import {
   childByType,
   collapseWs,
+  locFromNode,
   namedChildren,
   type LanguageExtractor,
   type SyntaxNode,
@@ -97,17 +98,18 @@ function statementsOf(node: SyntaxNode): SyntaxNode[] {
 }
 
 function collectStatements(
+  file: string,
   statements: SyntaxNode[],
   typeName: string | null,
 ): CallStep[] {
   const steps: CallStep[] = [];
   const seen = new Set<string>();
 
-  const addCall = (key: string, start: number) => {
-    const mark = `${key}:${start}`;
+  const addCall = (key: string, node: SyntaxNode) => {
+    const mark = `${key}:${node.startIndex}`;
     if (seen.has(mark)) return;
     seen.add(mark);
-    steps.push({ type: "call", key });
+    steps.push({ type: "call", key, ...locFromNode(file, node) });
   };
 
   const pushIfChain = (node: SyntaxNode, asElseIf: boolean): void => {
@@ -124,8 +126,9 @@ function collectStatements(
       type: "branch",
       key: condText ? `${kind}:${condText}` : kind,
       label: condText ? `${labelKind} ${condText}` : labelKind,
+      ...locFromNode(file, cond ?? node),
       children: thenBlock
-        ? collectStatements(statementsOf(thenBlock), typeName)
+        ? collectStatements(file, statementsOf(thenBlock), typeName)
         : [],
     });
 
@@ -142,7 +145,8 @@ function collectStatements(
       type: "branch",
       key: "else",
       label: "else",
-      children: collectStatements(statementsOf(elseInner), typeName),
+      ...locFromNode(file, elseClause),
+      children: collectStatements(file, statementsOf(elseInner), typeName),
     });
   };
 
@@ -186,8 +190,9 @@ function collectStatements(
           type: "branch",
           key: text ? `case:${text}` : "case",
           label: text ? `case ${text}` : "case",
+          ...locFromNode(file, pattern ?? arm),
           children: body
-            ? collectStatements(statementsOf(body), typeName)
+            ? collectStatements(file, statementsOf(body), typeName)
             : [],
         });
       }
@@ -198,7 +203,7 @@ function collectStatements(
       const callee = node.namedChild(0);
       if (callee) {
         const key = calleeKey(callee, typeName);
-        if (key) addCall(key, node.startIndex);
+        if (key) addCall(key, node);
       }
     }
 
@@ -233,7 +238,7 @@ function handleFunctionItem(
     key,
     label: `${labelBase}${getParamsLabel(params)}`,
     file,
-    steps: body ? collectStatements(statementsOf(body), typeName) : [],
+    steps: body ? collectStatements(file, statementsOf(body), typeName) : [],
     exported,
     start: node.startIndex,
     end: node.endIndex,

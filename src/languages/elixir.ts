@@ -5,6 +5,7 @@ import type { CallStep, FunctionInfo } from "../types.js";
 import {
   childByType,
   collapseWs,
+  locFromNode,
   namedChildren,
   type LanguageExtractor,
   type SyntaxNode,
@@ -116,25 +117,27 @@ function bodyOfDef(call: SyntaxNode): SyntaxNode | null {
 }
 
 function collectBody(
+  file: string,
   body: SyntaxNode | null,
   moduleName: string | null,
 ): CallStep[] {
   if (!body) return [];
-  return collectStatements(namedChildren(body), moduleName);
+  return collectStatements(file, namedChildren(body), moduleName);
 }
 
 function collectStatements(
+  file: string,
   statements: SyntaxNode[],
   moduleName: string | null,
 ): CallStep[] {
   const steps: CallStep[] = [];
   const seen = new Set<string>();
 
-  const addCall = (key: string, start: number) => {
-    const mark = `${key}:${start}`;
+  const addCall = (key: string, node: SyntaxNode) => {
+    const mark = `${key}:${node.startIndex}`;
     if (seen.has(mark)) return;
     seen.add(mark);
-    steps.push({ type: "call", key });
+    steps.push({ type: "call", key, ...locFromNode(file, node) });
   };
 
   const walk = (node: SyntaxNode): void => {
@@ -159,14 +162,16 @@ function collectStatements(
           type: "branch",
           key: condText ? `if:${condText}` : "if",
           label: condText ? `if ${condText}` : "if",
-          children: collectStatements(thenKids, moduleName),
+          ...locFromNode(file, cond ?? node),
+          children: collectStatements(file, thenKids, moduleName),
         });
         if (elseBlock) {
           steps.push({
             type: "branch",
             key: "else",
             label: "else",
-            children: collectBody(elseBlock, moduleName),
+            ...locFromNode(file, elseBlock),
+            children: collectBody(file, elseBlock, moduleName),
           });
         }
         // cond may contain calls — walk it
@@ -184,7 +189,8 @@ function collectStatements(
             type: "branch",
             key: text ? `case:${text}` : "case",
             label: text ? `case ${text}` : "case",
-            children: body ? collectBody(body, moduleName) : [],
+            ...locFromNode(file, pattern ?? clause),
+            children: body ? collectBody(file, body, moduleName) : [],
           });
         }
         return;
@@ -200,7 +206,8 @@ function collectStatements(
             type: "branch",
             key: text ? `cond:${text}` : "cond",
             label: text ? `cond ${text}` : "cond",
-            children: body ? collectBody(body, moduleName) : [],
+            ...locFromNode(file, pattern ?? clause),
+            children: body ? collectBody(file, body, moduleName) : [],
           });
         }
         return;
@@ -220,7 +227,8 @@ function collectStatements(
           type: "branch",
           key: "try",
           label: "try",
-          children: collectStatements(tryKids, moduleName),
+          ...locFromNode(file, node),
+          children: collectStatements(file, tryKids, moduleName),
         });
         const rescue = doBlock ? childByType(doBlock, "rescue_block") : null;
         if (rescue) {
@@ -233,7 +241,8 @@ function collectStatements(
               type: "branch",
               key: text ? `rescue:${text}` : "rescue",
               label: text ? `rescue ${text}` : "rescue",
-              children: body ? collectBody(body, moduleName) : [],
+              ...locFromNode(file, pattern ?? clause),
+              children: body ? collectBody(file, body, moduleName) : [],
             });
           }
         }
@@ -243,7 +252,8 @@ function collectStatements(
             type: "branch",
             key: "after",
             label: "after",
-            children: collectBody(after, moduleName),
+            ...locFromNode(file, after),
+            children: collectBody(file, after, moduleName),
           });
         }
         return;
@@ -256,7 +266,7 @@ function collectStatements(
       const hasExplicitArgs = args !== null;
       if (callee && callee.type !== "do_block") {
         const key = calleeKey(callee, moduleName, hasExplicitArgs);
-        if (key) addCall(key, node.startIndex);
+        if (key) addCall(key, node);
       }
       // Walk args for nested calls, but skip field-ish dots without further calls
       if (args) walk(args);
@@ -290,7 +300,7 @@ function handleDef(
     key,
     label: `${key}${getParamsLabel(params)}`,
     file,
-    steps: collectBody(body, moduleName),
+    steps: collectBody(file, body, moduleName),
     exported,
     start: call.startIndex,
     end: call.endIndex,

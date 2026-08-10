@@ -6,6 +6,7 @@ import type { CallStep, FunctionInfo } from "../types.js";
 import {
   childByType,
   collapseWs,
+  locFromNode,
   namedChildren,
   type LanguageExtractor,
   type SyntaxNode,
@@ -71,6 +72,7 @@ function valuePathKey(node: SyntaxNode, moduleName: string | null): string | nul
 }
 
 function collectExpr(
+  file: string,
   node: SyntaxNode | null,
   moduleName: string | null,
 ): CallStep[] {
@@ -78,11 +80,11 @@ function collectExpr(
   const steps: CallStep[] = [];
   const seen = new Set<string>();
 
-  const addCall = (key: string, start: number) => {
-    const mark = `${key}:${start}`;
+  const addCall = (key: string, node: SyntaxNode) => {
+    const mark = `${key}:${node.startIndex}`;
     if (seen.has(mark)) return;
     seen.add(mark);
-    steps.push({ type: "call", key });
+    steps.push({ type: "call", key, ...locFromNode(file, node) });
   };
 
   const walk = (n: SyntaxNode): void => {
@@ -137,7 +139,8 @@ function collectExpr(
           type: "branch",
           key: "try",
           label: "try",
-          children: tryBody ? collectExpr(tryBody, moduleName) : [],
+          ...locFromNode(file, n),
+          children: tryBody ? collectExpr(file, tryBody, moduleName) : [],
         });
       }
       for (const clause of namedChildren(n)) {
@@ -151,7 +154,8 @@ function collectExpr(
           type: "branch",
           key: text ? `${labelKind}:${text}` : labelKind,
           label: text ? `${labelKind} ${text}` : labelKind,
-          children: body ? collectExpr(body, moduleName) : [],
+          ...locFromNode(file, pattern ?? clause),
+          children: body ? collectExpr(file, body, moduleName) : [],
         });
       }
       return;
@@ -170,14 +174,19 @@ function collectExpr(
         type: "branch",
         key: condText ? `if:${condText}` : "if",
         label: condText ? `if ${condText}` : "if",
+        ...locFromNode(file, cond ?? n),
         children: thenClause
-          ? collectExpr(thenClause.namedChild(0) ?? thenClause, moduleName)
+          ? collectExpr(
+              file,
+              thenClause.namedChild(0) ?? thenClause,
+              moduleName,
+            )
           : [],
       });
       if (elseClause) {
         const elseBody = elseClause.namedChild(0) ?? elseClause;
         if (elseBody.type === "if_expression") {
-          const nested = collectExpr(elseBody, moduleName);
+          const nested = collectExpr(file, elseBody, moduleName);
           for (const s of nested) {
             if (s.type === "branch" && (s.key === "if" || s.key.startsWith("if:"))) {
               steps.push({
@@ -194,7 +203,8 @@ function collectExpr(
             type: "branch",
             key: "else",
             label: "else",
-            children: collectExpr(elseBody, moduleName),
+            ...locFromNode(file, elseClause),
+            children: collectExpr(file, elseBody, moduleName),
           });
         }
       }
@@ -206,7 +216,7 @@ function collectExpr(
       const callee = n.namedChild(0);
       if (callee) {
         const key = valuePathKey(callee, moduleName);
-        if (key) addCall(key, n.startIndex);
+        if (key) addCall(key, n);
       }
       for (const child of namedChildren(n).slice(1)) walk(child);
       return;
@@ -266,7 +276,7 @@ function handleLetBinding(
     key,
     label: `${key}${getParamsLabel(binding)}`,
     file,
-    steps: collectExpr(funBody, moduleName),
+    steps: collectExpr(file, funBody, moduleName),
     exported: true,
     start: binding.startIndex,
     end: binding.endIndex,

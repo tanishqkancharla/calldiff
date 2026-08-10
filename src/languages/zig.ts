@@ -6,6 +6,7 @@ import type { CallStep, FunctionInfo } from "../types.js";
 import {
   childByType,
   collapseWs,
+  locFromNode,
   namedChildren,
   type LanguageExtractor,
   type SyntaxNode,
@@ -57,17 +58,18 @@ function statementsOf(block: SyntaxNode | null): SyntaxNode[] {
 }
 
 function collectStatements(
+  file: string,
   statements: SyntaxNode[],
   typeName: string | null,
 ): CallStep[] {
   const steps: CallStep[] = [];
   const seen = new Set<string>();
 
-  const addCall = (key: string, start: number) => {
-    const mark = `${key}:${start}`;
+  const addCall = (key: string, node: SyntaxNode) => {
+    const mark = `${key}:${node.startIndex}`;
     if (seen.has(mark)) return;
     seen.add(mark);
-    steps.push({ type: "call", key });
+    steps.push({ type: "call", key, ...locFromNode(file, node) });
   };
 
   const walk = (node: SyntaxNode): void => {
@@ -101,7 +103,8 @@ function collectStatements(
         type: "branch",
         key: condText ? `if:${condText}` : "if",
         label: condText ? `if ${condText}` : "if",
-        children: collectStatements(statementsOf(thenBlock), typeName),
+        ...locFromNode(file, cond ?? node),
+        children: collectStatements(file, statementsOf(thenBlock), typeName),
       });
       if (elseClause) {
         // else_clause → block | labeled_statement → block | if_statement
@@ -114,7 +117,7 @@ function collectStatements(
           null;
         if (elseBody?.type === "if_statement") {
           // else if — flatten by walking as nested if into else-if style
-          const nested = collectStatements([elseBody], typeName);
+          const nested = collectStatements(file, [elseBody], typeName);
           for (const s of nested) {
             if (s.type === "branch" && s.key.startsWith("if:")) {
               steps.push({
@@ -135,14 +138,16 @@ function collectStatements(
             type: "branch",
             key: "else",
             label: "else",
-            children: collectStatements(statementsOf(blk), typeName),
+            ...locFromNode(file, elseClause),
+            children: collectStatements(file, statementsOf(blk), typeName),
           });
         } else {
           steps.push({
             type: "branch",
             key: "else",
             label: "else",
-            children: collectStatements(statementsOf(elseBody), typeName),
+            ...locFromNode(file, elseClause),
+            children: collectStatements(file, statementsOf(elseBody), typeName),
           });
         }
       }
@@ -154,7 +159,8 @@ function collectStatements(
         type: "branch",
         key: "try",
         label: "try",
-        children: collectStatements(namedChildren(node), typeName),
+        ...locFromNode(file, node),
+        children: collectStatements(file, namedChildren(node), typeName),
       });
       return;
     }
@@ -164,7 +170,8 @@ function collectStatements(
         type: "branch",
         key: "defer",
         label: "defer",
-        children: collectStatements(namedChildren(node), typeName),
+        ...locFromNode(file, node),
+        children: collectStatements(file, namedChildren(node), typeName),
       });
       return;
     }
@@ -189,8 +196,9 @@ function collectStatements(
           type: "branch",
           key: isElse ? "else" : text ? `case:${text}` : "case",
           label: isElse ? "else" : text ? `case ${text}` : "case",
+          ...locFromNode(file, pattern ?? clause),
           children: bodyNode
-            ? collectStatements([bodyNode], typeName)
+            ? collectStatements(file, [bodyNode], typeName)
             : [],
         });
       }
@@ -201,7 +209,7 @@ function collectStatements(
       const callee = node.namedChild(0);
       if (callee) {
         const key = calleeKey(callee, typeName);
-        if (key) addCall(key, node.startIndex);
+        if (key) addCall(key, node);
       }
       for (const child of namedChildren(node).slice(1)) walk(child);
       return;
@@ -229,7 +237,7 @@ function handleFunction(
     key,
     label: `${key}${getParamsLabel(params)}`,
     file,
-    steps: body ? collectStatements(statementsOf(body), typeName) : [],
+    steps: body ? collectStatements(file, statementsOf(body), typeName) : [],
     exported: true,
     start: node.startIndex,
     end: node.endIndex,

@@ -5,6 +5,7 @@ import type { CallStep, FunctionInfo } from "../types.js";
 import {
   childByType,
   collapseWs,
+  locFromNode,
   namedChildren,
   type LanguageExtractor,
   type SyntaxNode,
@@ -68,17 +69,18 @@ function condText(node: SyntaxNode | null): string {
 }
 
 function collectStatements(
+  file: string,
   statements: SyntaxNode[],
   className: string | null,
 ): CallStep[] {
   const steps: CallStep[] = [];
   const seen = new Set<string>();
 
-  const addCall = (key: string, start: number) => {
-    const mark = `${key}:${start}`;
+  const addCall = (key: string, node: SyntaxNode) => {
+    const mark = `${key}:${node.startIndex}`;
     if (seen.has(mark)) return;
     seen.add(mark);
-    steps.push({ type: "call", key });
+    steps.push({ type: "call", key, ...locFromNode(file, node) });
   };
 
   const walk = (node: SyntaxNode): void => {
@@ -107,8 +109,10 @@ function collectStatements(
         type: "branch",
         key: text ? `if:${text}` : "if",
         label: text ? `if ${text}` : "if",
+        ...locFromNode(file, cond ?? node),
         children: consequent
           ? collectStatements(
+              file,
               consequent.type === "block"
                 ? namedChildren(consequent)
                 : [consequent],
@@ -131,8 +135,10 @@ function collectStatements(
             type: "branch",
             key: elifText ? `else-if:${elifText}` : "else-if",
             label: elifText ? `else if ${elifText}` : "else if",
+            ...locFromNode(file, elifCond ?? alternative),
             children: elifCons
               ? collectStatements(
+                  file,
                   elifCons.type === "block"
                     ? namedChildren(elifCons)
                     : [elifCons],
@@ -147,7 +153,9 @@ function collectStatements(
           type: "branch",
           key: "else",
           label: "else",
+          ...locFromNode(file, alternative),
           children: collectStatements(
+            file,
             alternative.type === "block"
               ? namedChildren(alternative)
               : [alternative],
@@ -166,8 +174,9 @@ function collectStatements(
         type: "branch",
         key: "try",
         label: "try",
+        ...locFromNode(file, node),
         children: body
-          ? collectStatements(namedChildren(body), className)
+          ? collectStatements(file, namedChildren(body), className)
           : [],
       });
       for (const clause of namedChildren(node)) {
@@ -180,8 +189,9 @@ function collectStatements(
             type: "branch",
             key: text ? `catch:${text}` : "catch",
             label: text ? `catch ${text}` : "catch",
+            ...locFromNode(file, decl ?? clause),
             children: catchBody
-              ? collectStatements(namedChildren(catchBody), className)
+              ? collectStatements(file, namedChildren(catchBody), className)
               : [],
           });
         }
@@ -192,8 +202,9 @@ function collectStatements(
             type: "branch",
             key: "finally",
             label: "finally",
+            ...locFromNode(file, clause),
             children: finallyBody
-              ? collectStatements(namedChildren(finallyBody), className)
+              ? collectStatements(file, namedChildren(finallyBody), className)
               : [],
           });
         }
@@ -232,7 +243,8 @@ function collectStatements(
               type: "branch",
               key: "default",
               label: "default",
-              children: collectStatements(stmts, className),
+              ...locFromNode(file, section),
+              children: collectStatements(file, stmts, className),
             });
           } else {
             const text = pattern ? collapseWs(pattern.text) : "";
@@ -240,7 +252,8 @@ function collectStatements(
               type: "branch",
               key: text ? `case:${text}` : "case",
               label: text ? `case ${text}` : "case",
-              children: collectStatements(stmts, className),
+              ...locFromNode(file, pattern ?? section),
+              children: collectStatements(file, stmts, className),
             });
           }
         }
@@ -252,7 +265,7 @@ function collectStatements(
       const callee = node.namedChild(0);
       if (callee) {
         const key = calleeKey(callee, className);
-        if (key) addCall(key, node.startIndex);
+        if (key) addCall(key, node);
       }
     } else if (node.type === "object_creation_expression") {
       const typeId =
@@ -263,7 +276,7 @@ function collectStatements(
         ) ??
         null;
       if (typeId) {
-        addCall(`new ${collapseWs(typeId.text)}`, node.startIndex);
+        addCall(`new ${collapseWs(typeId.text)}`, node);
       }
     }
 
@@ -294,7 +307,7 @@ function handleMethod(
     key,
     label: `${key}${getParamsLabel(params)}`,
     file,
-    steps: body ? collectStatements(namedChildren(body), className) : [],
+    steps: body ? collectStatements(file, namedChildren(body), className) : [],
     exported: !isPrivate(node),
     start: node.startIndex,
     end: node.endIndex,
@@ -313,7 +326,7 @@ function handleConstructor(
     key: `${className}.constructor`,
     label: `new ${className}${getParamsLabel(params)}`,
     file,
-    steps: body ? collectStatements(namedChildren(body), className) : [],
+    steps: body ? collectStatements(file, namedChildren(body), className) : [],
     exported: !isPrivate(node),
     start: node.startIndex,
     end: node.endIndex,

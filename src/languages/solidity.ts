@@ -5,6 +5,7 @@ import type { CallStep, FunctionInfo } from "../types.js";
 import {
   childByType,
   collapseWs,
+  locFromNode,
   namedChildren,
   type LanguageExtractor,
   type SyntaxNode,
@@ -82,17 +83,18 @@ function unwrapStatement(stmt: SyntaxNode): SyntaxNode {
 }
 
 function collectStatements(
+  file: string,
   statements: SyntaxNode[],
   contractName: string | null,
 ): CallStep[] {
   const steps: CallStep[] = [];
   const seen = new Set<string>();
 
-  const addCall = (key: string, start: number) => {
-    const mark = `${key}:${start}`;
+  const addCall = (key: string, node: SyntaxNode) => {
+    const mark = `${key}:${node.startIndex}`;
     if (seen.has(mark)) return;
     seen.add(mark);
-    steps.push({ type: "call", key });
+    steps.push({ type: "call", key, ...locFromNode(file, node) });
   };
 
   const walk = (node: SyntaxNode): void => {
@@ -125,13 +127,14 @@ function collectStatements(
         type: "branch",
         key: condText ? `if:${condText}` : "if",
         label: condText ? `if ${condText}` : "if",
+        ...locFromNode(file, cond ?? node),
         children: thenNode
-          ? collectStatements(statementsOf(thenNode), contractName)
+          ? collectStatements(file, statementsOf(thenNode), contractName)
           : [],
       });
       if (elseNode) {
         if (elseNode.type === "if_statement") {
-          const nested = collectStatements([elseNode], contractName);
+          const nested = collectStatements(file, [elseNode], contractName);
           for (const s of nested) {
             if (s.type === "branch" && (s.key === "if" || s.key.startsWith("if:"))) {
               steps.push({
@@ -148,7 +151,12 @@ function collectStatements(
             type: "branch",
             key: "else",
             label: "else",
-            children: collectStatements(statementsOf(elseNode), contractName),
+            ...locFromNode(file, elseNode),
+            children: collectStatements(
+              file,
+              statementsOf(elseNode),
+              contractName,
+            ),
           });
         }
       }
@@ -167,7 +175,7 @@ function collectStatements(
       }
       if (target) {
         const key = calleeKey(target, contractName);
-        if (key) addCall(key, node.startIndex);
+        if (key) addCall(key, node);
       }
       for (const child of namedChildren(node).slice(1)) walk(child);
       return;
@@ -201,7 +209,9 @@ function handleFunction(
     key,
     label: `${key}${getParamsLabel(node)}`,
     file,
-    steps: body ? collectStatements(statementsOf(body), contractName) : [],
+    steps: body
+      ? collectStatements(file, statementsOf(body), contractName)
+      : [],
     exported: visibility === "private" || visibility === "internal" ? false : exported,
     start: node.startIndex,
     end: node.endIndex,
@@ -219,7 +229,9 @@ function handleConstructor(
     key: `${contractName}.constructor`,
     label: `new ${contractName}${getParamsLabel(node)}`,
     file,
-    steps: body ? collectStatements(statementsOf(body), contractName) : [],
+    steps: body
+      ? collectStatements(file, statementsOf(body), contractName)
+      : [],
     exported: true,
     start: node.startIndex,
     end: node.endIndex,

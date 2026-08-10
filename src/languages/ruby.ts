@@ -8,6 +8,7 @@ import type { CallStep, FunctionInfo } from "../types.js";
 import {
   childByType,
   collapseWs,
+  locFromNode,
   namedChildren,
   type LanguageExtractor,
   type SyntaxNode,
@@ -104,28 +105,30 @@ function bareCallKey(
 }
 
 function collectBody(
+  file: string,
   body: SyntaxNode | null,
   className: string | null,
 ): CallStep[] {
   if (!body) return [];
   if (body.type === "body_statement" || body.type === "then" || body.type === "else") {
-    return collectStatements(namedChildren(body), className);
+    return collectStatements(file, namedChildren(body), className);
   }
-  return collectStatements([body], className);
+  return collectStatements(file, [body], className);
 }
 
 function collectStatements(
+  file: string,
   statements: SyntaxNode[],
   className: string | null,
 ): CallStep[] {
   const steps: CallStep[] = [];
   const seen = new Set<string>();
 
-  const addCall = (key: string, start: number) => {
-    const mark = `${key}:${start}`;
+  const addCall = (key: string, node: SyntaxNode) => {
+    const mark = `${key}:${node.startIndex}`;
     if (seen.has(mark)) return;
     seen.add(mark);
-    steps.push({ type: "call", key });
+    steps.push({ type: "call", key, ...locFromNode(file, node) });
   };
 
   const walk = (node: SyntaxNode, asStatement: boolean): void => {
@@ -158,7 +161,8 @@ function collectStatements(
         type: "branch",
         key: condText ? `${kind}:${condText}` : kind,
         label: condText ? `${kind} ${condText}` : kind,
-        children: collectBody(thenNode, className),
+        ...locFromNode(file, cond ?? node),
+        children: collectBody(file, thenNode, className),
       });
 
       for (const clause of kids) {
@@ -172,7 +176,8 @@ function collectStatements(
             type: "branch",
             key: text ? `else-if:${text}` : "else-if",
             label: text ? `elsif ${text}` : "elsif",
-            children: collectBody(childByType(clause, "then"), className),
+            ...locFromNode(file, elsifCond ?? clause),
+            children: collectBody(file, childByType(clause, "then"), className),
           });
           // nested else under elsif
           const nestedElse = childByType(clause, "else");
@@ -181,7 +186,8 @@ function collectStatements(
               type: "branch",
               key: "else",
               label: "else",
-              children: collectBody(nestedElse, className),
+              ...locFromNode(file, nestedElse),
+              children: collectBody(file, nestedElse, className),
             });
           }
         }
@@ -190,7 +196,8 @@ function collectStatements(
             type: "branch",
             key: "else",
             label: "else",
-            children: collectBody(clause, className),
+            ...locFromNode(file, clause),
+            children: collectBody(file, clause, className),
           });
         }
       }
@@ -209,7 +216,8 @@ function collectStatements(
         type: "branch",
         key: "try",
         label: "begin",
-        children: collectStatements(bodyStmts, className),
+        ...locFromNode(file, node),
+        children: collectStatements(file, bodyStmts, className),
       });
       for (const clause of namedChildren(node)) {
         if (clause.type === "rescue") {
@@ -220,9 +228,11 @@ function collectStatements(
             type: "branch",
             key: text ? `rescue:${text}` : "rescue",
             label: text ? `rescue ${text}` : "rescue",
+            ...locFromNode(file, exceptions ?? clause),
             children: thenNode
-              ? collectBody(thenNode, className)
+              ? collectBody(file, thenNode, className)
               : collectStatements(
+                  file,
                   namedChildren(clause).filter(
                     (c) => c.type !== "exceptions" && c.type !== "exception_variable",
                   ),
@@ -235,7 +245,8 @@ function collectStatements(
             type: "branch",
             key: "else",
             label: "else",
-            children: collectBody(clause, className),
+            ...locFromNode(file, clause),
+            children: collectBody(file, clause, className),
           });
         }
         if (clause.type === "ensure") {
@@ -243,7 +254,8 @@ function collectStatements(
             type: "branch",
             key: "ensure",
             label: "ensure",
-            children: collectStatements(namedChildren(clause), className),
+            ...locFromNode(file, clause),
+            children: collectStatements(file, namedChildren(clause), className),
           });
         }
       }
@@ -262,7 +274,8 @@ function collectStatements(
             type: "branch",
             key: text ? `when:${text}` : "when",
             label: text ? `when ${text}` : "when",
-            children: collectBody(childByType(clause, "then"), className),
+            ...locFromNode(file, pattern ?? clause),
+            children: collectBody(file, childByType(clause, "then"), className),
           });
         }
         if (clause.type === "else") {
@@ -270,7 +283,8 @@ function collectStatements(
             type: "branch",
             key: "else",
             label: "else",
-            children: collectBody(clause, className),
+            ...locFromNode(file, clause),
+            children: collectBody(file, clause, className),
           });
         }
       }
@@ -303,7 +317,7 @@ function collectStatements(
         (asStatement || hasArgs || !isReceiverCall)
       ) {
         const key = callKey(node, className);
-        if (key) addCall(key, node.startIndex);
+        if (key) addCall(key, node);
       }
       // Nested invocations inside arguments (not bare attr reads)
       const args = childByType(node, "argument_list");
@@ -323,7 +337,7 @@ function collectStatements(
           // Prefer free name for top-level helpers assigned into locals
           if (key) {
             // If className set, bareCallKey prefixes — for assignment RHS use free name
-            addCall(rhs.text, rhs.startIndex);
+            addCall(rhs.text, rhs);
           }
         } else {
           walk(rhs, false);
@@ -335,7 +349,7 @@ function collectStatements(
     // Statement-level bare identifier → method call
     if (node.type === "identifier" && asStatement) {
       const key = bareCallKey(node, className);
-      if (key) addCall(key, node.startIndex);
+      if (key) addCall(key, node);
       return;
     }
 
@@ -371,7 +385,7 @@ function handleMethod(
     key,
     label: `${labelBase}${getParamsLabel(params)}`,
     file,
-    steps: collectBody(body, className),
+    steps: collectBody(file, body, className),
     exported: !name.startsWith("_"),
     start: node.startIndex,
     end: node.endIndex,
@@ -403,7 +417,7 @@ function handleSingletonMethod(
     key,
     label: `${key}${getParamsLabel(params)}`,
     file,
-    steps: collectBody(body, className),
+    steps: collectBody(file, body, className),
     exported: !name.startsWith("_"),
     start: node.startIndex,
     end: node.endIndex,

@@ -6,6 +6,7 @@ import type { CallStep, FunctionInfo } from "../types.js";
 import {
   childByType,
   collapseWs,
+  locFromNode,
   namedChildren,
   type LanguageExtractor,
   type SyntaxNode,
@@ -95,25 +96,27 @@ function calleeKey(node: SyntaxNode, className: string | null): string | null {
 }
 
 function collectBlock(
+  file: string,
   block: SyntaxNode | null,
   className: string | null,
 ): CallStep[] {
   if (!block) return [];
-  return collectStatements(namedChildren(block), className);
+  return collectStatements(file, namedChildren(block), className);
 }
 
 function collectStatements(
+  file: string,
   statements: SyntaxNode[],
   className: string | null,
 ): CallStep[] {
   const steps: CallStep[] = [];
   const seen = new Set<string>();
 
-  const addCall = (key: string, start: number) => {
-    const mark = `${key}:${start}`;
+  const addCall = (key: string, node: SyntaxNode) => {
+    const mark = `${key}:${node.startIndex}`;
     if (seen.has(mark)) return;
     seen.add(mark);
-    steps.push({ type: "call", key });
+    steps.push({ type: "call", key, ...locFromNode(file, node) });
   };
 
   const walk = (node: SyntaxNode): void => {
@@ -140,7 +143,8 @@ function collectStatements(
         type: "branch",
         key: cond ? `if:${cond}` : "if",
         label: cond ? `if ${cond}` : "if",
-        children: collectBlock(childByType(node, "block"), className),
+        ...locFromNode(file, condNode ?? node),
+        children: collectBlock(file, childByType(node, "block"), className),
       });
 
       for (const clause of namedChildren(node)) {
@@ -152,7 +156,8 @@ function collectStatements(
             type: "branch",
             key: text ? `else-if:${text}` : "else-if",
             label: text ? `elif ${text}` : "elif",
-            children: collectBlock(childByType(clause, "block"), className),
+            ...locFromNode(file, elifCond ?? clause),
+            children: collectBlock(file, childByType(clause, "block"), className),
           });
         }
         if (clause.type === "else_clause") {
@@ -160,7 +165,8 @@ function collectStatements(
             type: "branch",
             key: "else",
             label: "else",
-            children: collectBlock(childByType(clause, "block"), className),
+            ...locFromNode(file, clause),
+            children: collectBlock(file, childByType(clause, "block"), className),
           });
         }
       }
@@ -186,7 +192,8 @@ function collectStatements(
           type: "branch",
           key: text ? `case:${text}` : "case",
           label,
-          children: collectBlock(childByType(clause, "block"), className),
+          ...locFromNode(file, pattern ?? clause),
+          children: collectBlock(file, childByType(clause, "block"), className),
         });
       }
       return;
@@ -198,7 +205,8 @@ function collectStatements(
         type: "branch",
         key: "try",
         label: "try",
-        children: collectBlock(tryBlock, className),
+        ...locFromNode(file, node),
+        children: collectBlock(file, tryBlock, className),
       });
       for (const clause of namedChildren(node)) {
         if (clause.type === "except_clause") {
@@ -211,7 +219,8 @@ function collectStatements(
             type: "branch",
             key: text ? `except:${text}` : "except",
             label: text ? `except ${text}` : "except",
-            children: collectBlock(childByType(clause, "block"), className),
+            ...locFromNode(file, handlerType ?? clause),
+            children: collectBlock(file, childByType(clause, "block"), className),
           });
         }
         if (clause.type === "else_clause") {
@@ -219,7 +228,8 @@ function collectStatements(
             type: "branch",
             key: "else",
             label: "else",
-            children: collectBlock(childByType(clause, "block"), className),
+            ...locFromNode(file, clause),
+            children: collectBlock(file, childByType(clause, "block"), className),
           });
         }
         if (clause.type === "finally_clause") {
@@ -227,7 +237,8 @@ function collectStatements(
             type: "branch",
             key: "finally",
             label: "finally",
-            children: collectBlock(childByType(clause, "block"), className),
+            ...locFromNode(file, clause),
+            children: collectBlock(file, childByType(clause, "block"), className),
           });
         }
       }
@@ -238,7 +249,7 @@ function collectStatements(
       const callee = node.namedChild(0);
       if (callee) {
         const key = calleeKey(callee, className);
-        if (key) addCall(key, node.startIndex);
+        if (key) addCall(key, node);
       }
       // Still walk arguments for nested calls, but not into nested lambdas
       for (const child of namedChildren(node).slice(1)) walk(child);
@@ -275,9 +286,9 @@ function pushFunction(
     file,
     steps:
       body && body.type === "block"
-        ? collectBlock(body, className)
+        ? collectBlock(file, body, className)
         : body
-          ? collectStatements([body], className)
+          ? collectStatements(file, [body], className)
           : [],
     exported,
     start: node.startIndex,

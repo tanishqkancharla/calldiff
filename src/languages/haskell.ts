@@ -5,6 +5,7 @@ import type { CallStep, FunctionInfo } from "../types.js";
 import {
   childByType,
   collapseWs,
+  locFromNode,
   namedChildren,
   type LanguageExtractor,
   type SyntaxNode,
@@ -67,22 +68,22 @@ function calleeFromExp(node: SyntaxNode): string | null {
   return null;
 }
 
-function collectFromMatch(match: SyntaxNode | null): CallStep[] {
+function collectFromMatch(file: string, match: SyntaxNode | null): CallStep[] {
   if (!match) return [];
   const body = match.namedChild(0) ?? namedChildren(match)[0] ?? null;
   if (!body) return [];
-  return collectExpr(body);
+  return collectExpr(file, body);
 }
 
-function collectExpr(node: SyntaxNode): CallStep[] {
+function collectExpr(file: string, node: SyntaxNode): CallStep[] {
   const steps: CallStep[] = [];
   const seen = new Set<string>();
 
-  const addCall = (key: string, start: number) => {
-    const mark = `${key}:${start}`;
+  const addCall = (key: string, node: SyntaxNode) => {
+    const mark = `${key}:${node.startIndex}`;
     if (seen.has(mark)) return;
     seen.add(mark);
-    steps.push({ type: "call", key });
+    steps.push({ type: "call", key, ...locFromNode(file, node) });
   };
 
   const walk = (n: SyntaxNode): void => {
@@ -107,14 +108,16 @@ function collectExpr(node: SyntaxNode): CallStep[] {
         type: "branch",
         key: condText ? `if:${condText}` : "if",
         label: condText ? `if ${condText}` : "if",
-        children: thenE ? collectExpr(thenE) : [],
+        ...locFromNode(file, cond ?? n),
+        children: thenE ? collectExpr(file, thenE) : [],
       });
       if (elseE) {
         steps.push({
           type: "branch",
           key: "else",
           label: "else",
-          children: collectExpr(elseE),
+          ...locFromNode(file, elseE),
+          children: collectExpr(file, elseE),
         });
       }
       return;
@@ -132,7 +135,8 @@ function collectExpr(node: SyntaxNode): CallStep[] {
           type: "branch",
           key: text ? `case:${text}` : "case",
           label: text ? `case ${text}` : "case",
-          children: collectFromMatch(match),
+          ...locFromNode(file, pattern ?? alt),
+          children: collectFromMatch(file, match),
         });
       }
       return;
@@ -142,7 +146,7 @@ function collectExpr(node: SyntaxNode): CallStep[] {
       const key = calleeFromExp(n);
       // Skip type-like constructors: Just x, Runner
       if (key && !isLikelyTypeName(key.split(".").pop() ?? key)) {
-        addCall(key, n.startIndex);
+        addCall(key, n);
       }
       // Walk argument expressions for nested applies, but not bare variable args
       for (const child of namedChildren(n).slice(1)) {
@@ -162,7 +166,7 @@ function collectExpr(node: SyntaxNode): CallStep[] {
     if (n.type === "variable") {
       // Bare variable used as expression in do-block is a call-ish nullary
       if (n.text !== "return" && n.text !== "pure" && !isLikelyTypeName(n.text)) {
-        addCall(n.text, n.startIndex);
+        addCall(n.text, n);
       }
       return;
     }
@@ -170,7 +174,7 @@ function collectExpr(node: SyntaxNode): CallStep[] {
     if (n.type === "qualified") {
       const key = calleeFromExp(n);
       if (key && !isLikelyTypeName(key.split(".").pop() ?? key)) {
-        addCall(key, n.startIndex);
+        addCall(key, n);
       }
       return;
     }
@@ -222,7 +226,7 @@ function handleFunctionOrBind(
     key: name,
     label: `${name}${getParamsLabel(patterns)}`,
     file,
-    steps: collectFromMatch(match),
+    steps: collectFromMatch(file, match),
     exported: true,
     start: node.startIndex,
     end: node.endIndex,
