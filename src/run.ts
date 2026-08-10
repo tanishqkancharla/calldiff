@@ -31,7 +31,7 @@ export type DiffRunOptions = {
   maxDepth?: number;
   /** When false, skip ANSI colors in ascii output. Default: true */
   color?: boolean;
-  /** When false, omit file:line suffixes in ascii. Default: true */
+  /** When true, append file:line suffixes in ascii. Default: false */
   locs?: boolean;
 };
 
@@ -121,7 +121,7 @@ export function runDiff(options: DiffRunOptions = {}): DiffResult {
   const maxDepth = options.maxDepth ?? 12;
   const entriesOpt = options.entries ?? [];
   const color = options.color !== false;
-  const locs = options.locs !== false;
+  const locs = options.locs === true;
 
   assertGitRepo(cwd);
 
@@ -203,7 +203,7 @@ export function runTree(options: TreeRunOptions): TreeResult {
   const cwd = options.cwd ?? process.cwd();
   const maxDepth = options.maxDepth ?? 12;
   const color = options.color !== false;
-  const locs = options.locs !== false;
+  const locs = options.locs === true;
 
   assertGitRepo(cwd);
 
@@ -246,7 +246,7 @@ export function runReach(options: ReachRunOptions): ReachResult {
   const cwd = options.cwd ?? process.cwd();
   const maxDepth = options.maxDepth ?? 12;
   const color = options.color !== false;
-  const locs = options.locs !== false;
+  const locs = options.locs === true;
 
   assertGitRepo(cwd);
 

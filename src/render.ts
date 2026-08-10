@@ -29,7 +29,7 @@ export interface RenderOptions {
   color?: boolean;
   /**
    * Append `file:line` (or `file:line-line`) after each label.
-   * Default: true.
+   * Default: false.
    */
   locs?: boolean;
 }
@@ -50,7 +50,7 @@ function renderAsciiTree(
   withStatus: boolean,
 ): string {
   const useColor = options.color !== false;
-  const showLocs = options.locs !== false;
+  const showLocs = options.locs === true;
 
   const paintStatus = (status: DiffStatus, text: string): string =>
     useColor ? paint(status, text) : text;

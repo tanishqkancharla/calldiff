@@ -77,7 +77,7 @@ const maxDepthOption = z.coerce
 
 const locsOption = z
   .boolean()
-  .default(true)
+  .default(false)
   .describe("Show call-site source locations (file:line)");
 
 const pathsArg = z

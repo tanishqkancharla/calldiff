@@ -53,7 +53,7 @@ calldiff diff main feature src/lib
 calldiff tree -e createAgentSession
 calldiff tree HEAD -e PiService.createAgentSession
 calldiff tree main -e boot --max-depth 8 src/lib
-calldiff tree -e runCheckout --no-locs examples/checkout
+calldiff tree -e runCheckout --locs examples/checkout
 
 # find all call paths from one symbol to another — requires --entry and --to
 calldiff reach -e runCheckout --to sendEmail
@@ -87,10 +87,10 @@ If you omit `--entry`, calldiff infers exported functions whose expanded call tr
 | `calldiff tree <ref> -e <name>` | that commit/ref |
 
 Prints a plain ASCII call tree (no `+/−` markers). `--entry` / `-e` is required.
-Each node (except when disabled with `--no-locs`) shows a source location:
-the root uses the definition `file:line`, and children use the **call site** in
-the parent (`file:line` or `file:line-line`) — same idea as LSP Call Hierarchy
-`fromRanges`, not Go to Definition.
+With `--locs`, each node shows a source location: the root uses the definition
+`file:line`, and children use the **call site** in the parent (`file:line` or
+`file:line-line`) — same idea as LSP Call Hierarchy `fromRanges`, not Go to
+Definition.
 
 ### `reach`
 
@@ -108,7 +108,7 @@ Prints every call path from the entrypoint to the target (including alternate `i
 - `new ClassName` — constructor / `new` call
 - `Component` — JSX/TSX component tags (`<Button />`); children nest under the parent
 - `if (cond)` / `else` / `else if (cond)` — conditional arms (no continuing `│` rail)
-- `file:line` — call-site (or root definition) location; toggle with `--locs` / `--no-locs` (default on)
+- `file:line` — call-site (or root definition) location; enable with `--locs` (default off)
 
 ### Supported languages
 
