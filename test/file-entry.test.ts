@@ -126,11 +126,15 @@ describe("CLI --file entrypoints", () => {
 
     const result = host.run("calldiff tree --file packages/api/src/boot.ts");
     expect(result.code).toBe(0);
-    expect(result.stdout).toContain("boot()");
-    expect(result.stdout).toContain("run()");
-    expect(result.stdout).toContain("ready()");
-    expect(result.stdout).toContain("ping()");
-    expect(result.stdout).not.toContain("decoy()");
+    expect(result.stdout).toEqual(src`
+      calldiff tree working tree
+
+      boot()
+      └─ run()
+
+      ready()
+      └─ ping()
+    `);
   });
 
   test("tree -F pins to the file when the same name exists elsewhere", () => {
