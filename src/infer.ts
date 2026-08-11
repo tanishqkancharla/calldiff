@@ -2,6 +2,7 @@ import type { FunctionIndex } from "./extract.js";
 import { flattenCallKeys } from "./extract.js";
 import { buildCallTree, resolveEntry } from "./calltree.js";
 import { diffTrees, treeHasChanges } from "./diff.js";
+import { SymbolNotFoundError } from "./errors.js";
 import type { DiffNode, FunctionInfo } from "./types.js";
 
 function functionShape(fn: FunctionInfo | undefined): string | null {
@@ -82,12 +83,15 @@ export function inferEntries(
   after: FunctionIndex,
   explicit: string[],
   maxDepth: number,
+  hintFor?: (entry: string) => string | undefined,
 ): string[] {
   if (explicit.length > 0) {
     const entries: string[] = [];
     for (const entry of explicit) {
       const key = resolveEntry(entry, after) ?? resolveEntry(entry, before);
-      if (!key) throw new Error(`Entrypoint not found: ${entry}`);
+      if (!key) {
+        throw new SymbolNotFoundError("entrypoint", entry, hintFor?.(entry));
+      }
       if (!entries.includes(key)) entries.push(key);
     }
     return entries;

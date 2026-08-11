@@ -8,6 +8,7 @@ import type { CallStep, FunctionInfo } from "./types.js";
 import { loadGrammarPackage, resolveLanguage } from "./languages/grammars.js";
 import { detectLanguage } from "./languages/registry.js";
 import { linesFromOffsets } from "./loc.js";
+import type { ReexportInfo } from "./reexport.js";
 
 const parser = new Parser();
 const languageCache = new Map<string, unknown>();
@@ -79,6 +80,9 @@ export type FunctionIndex = Map<string, FunctionInfo>;
  */
 const indexDefinitions = new WeakMap<FunctionIndex, FunctionInfo[]>();
 
+/** Named re-exports discovered while building the index (barrel hints). */
+const indexReexports = new WeakMap<FunctionIndex, ReexportInfo[]>();
+
 export function flattenCallKeys(steps: CallStep[]): string[] {
   const keys: string[] = [];
   const walk = (list: CallStep[]) => {
@@ -101,6 +105,18 @@ export function flattenCallKeys(steps: CallStep[]): string[] {
  */
 export function allFunctions(index: FunctionIndex): FunctionInfo[] {
   return indexDefinitions.get(index) ?? [...index.values()];
+}
+
+/** Re-exports attached when the index was built via {@link setIndexReexports}. */
+export function getIndexReexports(index: FunctionIndex): ReexportInfo[] {
+  return indexReexports.get(index) ?? [];
+}
+
+export function setIndexReexports(
+  index: FunctionIndex,
+  reexports: ReexportInfo[],
+): void {
+  indexReexports.set(index, reexports);
 }
 
 export function buildIndex(functions: FunctionInfo[]): FunctionIndex {

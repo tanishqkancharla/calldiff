@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   rmSync,
@@ -11,8 +12,17 @@ import { fileURLToPath } from "node:url";
 import { onTestFinished } from "vitest";
 
 const projectRoot = fileURLToPath(new URL("..", import.meta.url));
+const distCli = join(projectRoot, "dist/cli.js");
 const tsxCli = join(projectRoot, "node_modules/tsx/dist/cli.mjs");
-const calldiffCli = join(projectRoot, "src/cli.ts");
+const srcCli = join(projectRoot, "src/cli.ts");
+
+/** Prefer the built binary; fall back to tsx for local unbuilt checkouts. */
+function cliInvocation(): { command: string; argsPrefix: string[] } {
+  if (existsSync(distCli)) {
+    return { command: process.execPath, argsPrefix: [distCli] };
+  }
+  return { command: process.execPath, argsPrefix: [tsxCli, srcCli] };
+}
 
 export type RunResult = {
   stdout: string;
@@ -74,6 +84,10 @@ export function workspace(files: Record<string, string> = {}): WorkspaceHost {
   git(root, ["init", "-q"]);
   git(root, ["config", "user.email", "test@example.com"]);
   git(root, ["config", "user.name", "Test"]);
+  // Cloud/agent environments may force SSH commit signing globally; that can
+  // hang forever on the auth socket. Keep fixture commits unsigned.
+  git(root, ["config", "commit.gpgsign", "false"]);
+  git(root, ["config", "tag.gpgsign", "false"]);
 
   const host: WorkspaceHost = {
     root,
@@ -88,19 +102,19 @@ export function workspace(files: Record<string, string> = {}): WorkspaceHost {
     },
     run(command) {
       const args = normalizeArgv(command);
-      const result = spawnSync(
-        process.execPath,
-        [tsxCli, calldiffCli, ...args],
-        {
-          cwd: root,
-          encoding: "utf8",
-          env: {
-            ...process.env,
-            // Keep grammar cache shared with the vitest env.
-            FORCE_COLOR: "0",
-          },
+      const { command: node, argsPrefix } = cliInvocation();
+      const result = spawnSync(node, [...argsPrefix, ...args], {
+        cwd: root,
+        encoding: "utf8",
+        // Keep grammar installs / cold starts from hanging the suite forever.
+        timeout: 30_000,
+        env: {
+          ...process.env,
+          // Keep grammar cache shared with the vitest env.
+          FORCE_COLOR: "0",
+          npm_config_update_notifier: "false",
         },
-      );
+      });
       return {
         stdout: result.stdout ?? "",
         stderr: result.stderr ?? "",
