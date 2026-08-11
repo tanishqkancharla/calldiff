@@ -32,8 +32,11 @@ export type WorkspaceHost = {
   run: (command: string | string[]) => RunResult;
   /** Write (or overwrite) files relative to the workspace root. */
   write: (files: Record<string, string>) => void;
-  /** Stage all changes and commit; returns the new HEAD sha. */
-  commit: (message?: string) => string;
+  /**
+   * Stage and commit. Optional `files` are written first (same as `write`).
+   * Returns the new HEAD sha.
+   */
+  commit: (name: string, files?: Record<string, string>) => string;
 };
 
 /**
@@ -52,6 +55,11 @@ export type WorkspaceHost = {
  * });
  * const result = host.run("calldiff reach -e boot --to run");
  * expect(result.stdout).toContain("boot()");
+ *
+ * // Multi-commit history for `diff`:
+ * const before = host.commit("before", { "/src/app.ts": beforeSrc });
+ * const after = host.commit("after", { "/src/app.ts": afterSrc });
+ * host.run(`calldiff diff ${before} ${after} -e root`);
  * ```
  *
  * File paths are rooted at the temp directory (a leading `/` is optional).
@@ -72,9 +80,10 @@ export function workspace(files: Record<string, string> = {}): WorkspaceHost {
     write(next) {
       writeFiles(root, next);
     },
-    commit(message = "fixture") {
+    commit(name, files) {
+      if (files) writeFiles(root, files);
       git(root, ["add", "-A"]);
-      git(root, ["commit", "-qm", message]);
+      git(root, ["commit", "-qm", name]);
       return git(root, ["rev-parse", "HEAD"]).trim();
     },
     run(command) {
@@ -100,8 +109,7 @@ export function workspace(files: Record<string, string> = {}): WorkspaceHost {
     },
   };
 
-  host.write(files);
-  if (Object.keys(files).length > 0) host.commit("initial");
+  if (Object.keys(files).length > 0) host.commit("initial", files);
   return host;
 }
 

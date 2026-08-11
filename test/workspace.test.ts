@@ -100,22 +100,20 @@ describe("workspace fixture smoke", () => {
 
   test("calldiff diff compares two commits", () => {
     const host = workspace();
-    host.write({
+    const before = host.commit("before", {
       "/src/app.ts": src`
         export function root() {
           beforeCall();
         }
       `,
     });
-    const before = host.commit("before");
-    host.write({
+    const after = host.commit("after", {
       "/src/app.ts": src`
         export function root() {
           afterCall();
         }
       `,
     });
-    const after = host.commit("after");
 
     const result = host.run(`calldiff diff ${before} ${after} -e root`);
 
