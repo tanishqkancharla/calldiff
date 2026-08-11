@@ -81,7 +81,7 @@ calldiff mcp add      # register as MCP server
 
 If you omit `--entry`, calldiff infers exported functions whose expanded call trees changed (and may show several).
 
-A source file path as `--entry` / `-e` expands to every **exported** symbol defined in that file (useful in monorepos). Bare names with a supported extension count (`routes.ts`); so do paths with separators (`packages/api/src/routes.ts`). Ambiguous suffix matches error so you can pass a more specific path.
+A `--entry` / `-e` value that uniquely matches an **indexed source file** expands to every **exported** symbol defined in that file (useful in monorepos). Matching is by lookup against the snapshot — exact path, or a unique suffix (`boot.ts` → `packages/api/src/boot.ts`) — not by guessing from the string shape. Ambiguous suffix matches error so you can pass a more specific path; values that match no file are resolved as symbols.
 
 ### `tree`
 

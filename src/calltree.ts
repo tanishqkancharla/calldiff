@@ -1,6 +1,4 @@
-import { extname } from "node:path";
 import { allFunctions, type FunctionIndex } from "./extract.js";
-import { listSupportedExtensions } from "./languages/registry.js";
 import { pickLoc } from "./loc.js";
 import type { CallNode, CallStep, FunctionInfo } from "./types.js";
 
@@ -9,21 +7,13 @@ export function normalizeEntryPath(entry: string): string {
   return entry.replace(/\\/g, "/").replace(/^\.\//, "");
 }
 
-/**
- * True when `-e` should be treated as a source file path rather than a symbol.
- * Path separators always count; a bare name counts only with a supported ext
- * (e.g. `routes.ts`, not `ClassName.method`).
- */
-export function isFileEntrypoint(entry: string): boolean {
-  const normalized = normalizeEntryPath(entry);
-  if (normalized.includes("/")) return true;
-  const ext = extname(normalized).toLowerCase();
-  if (!ext) return false;
-  return listSupportedExtensions().includes(ext);
+/** Unique source paths present in an index. */
+export function indexedFiles(index: FunctionIndex): string[] {
+  return [...new Set(allFunctions(index).map((fn) => fn.file))].sort();
 }
 
 /**
- * Resolve which indexed source files match a file entrypoint.
+ * Resolve which indexed source files match an entry string.
  * Exact path wins; otherwise a unique suffix match (`routes.ts` → `src/routes.ts`).
  */
 export function matchEntrypointFiles(
@@ -42,6 +32,68 @@ export function matchEntrypointFiles(
     .sort();
 }
 
+export type ClassifiedEntrypoint =
+  | { kind: "file"; file: string }
+  | { kind: "symbol"; key: string };
+
+/**
+ * Decide whether `-e` names an indexed file or a symbol — by lookup, not by
+ * guessing from the string shape. Unique file match wins; otherwise symbol.
+ */
+export function classifyEntrypoint(
+  entry: string,
+  index: FunctionIndex,
+): ClassifiedEntrypoint {
+  const files = matchEntrypointFiles(entry, indexedFiles(index));
+  if (files.length > 1) {
+    throw new Error(
+      `Ambiguous entrypoint file: ${entry} matches ${files.join(", ")}. Use a more specific path.`,
+    );
+  }
+  if (files.length === 1) {
+    return { kind: "file", file: files[0]! };
+  }
+  const key = resolveEntry(entry, index);
+  if (key) return { kind: "symbol", key };
+  throw new Error(`Entrypoint not found: ${entry}`);
+}
+
+/**
+ * Like {@link classifyEntrypoint}, but file identity is taken from the union of
+ * both snapshots (so a path that exists on only one side still counts as a file).
+ */
+export function classifyEntrypointAcross(
+  entry: string,
+  before: FunctionIndex,
+  after: FunctionIndex,
+): ClassifiedEntrypoint {
+  const files = matchEntrypointFiles(entry, [
+    ...indexedFiles(before),
+    ...indexedFiles(after),
+  ]);
+  if (files.length > 1) {
+    throw new Error(
+      `Ambiguous entrypoint file: ${entry} matches ${files.join(", ")}. Use a more specific path.`,
+    );
+  }
+  if (files.length === 1) {
+    return { kind: "file", file: files[0]! };
+  }
+  const key = resolveEntry(entry, after) ?? resolveEntry(entry, before);
+  if (key) return { kind: "symbol", key };
+  throw new Error(`Entrypoint not found: ${entry}`);
+}
+
+/** Exported definitions in a concrete source path. */
+export function exportsInFile(
+  file: string,
+  index: FunctionIndex,
+): FunctionInfo[] {
+  return sortDefinitions(
+    allFunctions(index).filter((fn) => fn.file === file && fn.exported),
+  );
+}
+
 /**
  * Exported definitions in the file matched by `entry`.
  * Throws when the path is ambiguous across multiple indexed files.
@@ -51,19 +103,14 @@ export function resolveFileEntrypoints(
   entry: string,
   index: FunctionIndex,
 ): FunctionInfo[] {
-  const all = allFunctions(index);
-  const matched = matchEntrypointFiles(
-    entry,
-    all.map((fn) => fn.file),
-  );
+  const matched = matchEntrypointFiles(entry, indexedFiles(index));
   if (matched.length === 0) return [];
   if (matched.length > 1) {
     throw new Error(
       `Ambiguous entrypoint file: ${entry} matches ${matched.join(", ")}. Use a more specific path.`,
     );
   }
-  const file = matched[0]!;
-  return sortDefinitions(all.filter((fn) => fn.file === file && fn.exported));
+  return exportsInFile(matched[0]!, index);
 }
 
 function displayCallLabel(

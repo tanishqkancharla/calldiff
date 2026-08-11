@@ -21,7 +21,7 @@ Diff call stacks between two git trees
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--entry` | `unknown` |  | Entrypoint(s): functionName, ClassName.method, or source file path |
+| `--entry` | `unknown` |  | Entrypoint(s): functionName, ClassName.method, or indexed source file path |
 | `--maxDepth` | `number` | `12` | Max call-tree depth |
 | `--locs` | `boolean` | `false` | Show call-site source locations (file:line) |
 | `--from` | `string` |  | Left / "before" tree |
@@ -65,7 +65,7 @@ Find all call paths from an entrypoint to a target symbol
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--entry` | `unknown` |  | Entrypoint(s): functionName, ClassName.method, or source file path |
+| `--entry` | `unknown` |  | Entrypoint(s): functionName, ClassName.method, or indexed source file path |
 | `--to` | `string` |  | Target symbol to reach (functionName or ClassName.method) |
 | `--maxDepth` | `number` | `12` | Max call-tree depth |
 | `--locs` | `boolean` | `false` | Show call-site source locations (file:line) |
@@ -97,7 +97,7 @@ View a call tree (no diff) for one or more entrypoints
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--entry` | `unknown` |  | Entrypoint(s): functionName, ClassName.method, or source file path |
+| `--entry` | `unknown` |  | Entrypoint(s): functionName, ClassName.method, or indexed source file path |
 | `--maxDepth` | `number` | `12` | Max call-tree depth |
 | `--locs` | `boolean` | `false` | Show call-site source locations (file:line) |
 

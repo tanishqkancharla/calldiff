@@ -1,11 +1,10 @@
 import {
   buildCallTreeFromInfo,
-  isFileEntrypoint,
-  matchEntrypointFiles,
+  classifyEntrypoint,
+  exportsInFile,
   resolveEntry,
-  resolveFileEntrypoints,
 } from "./calltree.js";
-import { allFunctions, buildIndex, extractCached } from "./extract.js";
+import { buildIndex, extractCached } from "./extract.js";
 import {
   assertGitRepo,
   describeSnapshot,
@@ -114,8 +113,8 @@ function loadIndex(
 }
 
 /**
- * Resolve `-e` symbols and file paths to concrete definitions.
- * File paths expand to every exported symbol defined in that file.
+ * Resolve `-e` values to concrete definitions.
+ * Indexed file paths expand to every exported symbol defined in that file.
  */
 function resolveEntrypointInfos(
   index: FunctionIndex,
@@ -125,22 +124,11 @@ function resolveEntrypointInfos(
   const seen = new Set<string>();
 
   for (const entry of explicit) {
-    if (isFileEntrypoint(entry)) {
-      const infos = resolveFileEntrypoints(entry, index);
+    const classified = classifyEntrypoint(entry, index);
+    if (classified.kind === "file") {
+      const infos = exportsInFile(classified.file, index);
       if (infos.length === 0) {
-        const matched = matchEntrypointFiles(
-          entry,
-          allFunctions(index).map((fn) => fn.file),
-        );
-        if (matched.length === 0) {
-          throw new Error(`Entrypoint file not found: ${entry}`);
-        }
-        if (matched.length > 1) {
-          throw new Error(
-            `Ambiguous entrypoint file: ${entry} matches ${matched.join(", ")}. Use a more specific path.`,
-          );
-        }
-        throw new Error(`No exported entrypoints in ${matched[0]}`);
+        throw new Error(`No exported entrypoints in ${classified.file}`);
       }
       for (const info of infos) {
         const id = `${info.file}\0${info.key}\0${info.line ?? ""}`;
@@ -151,11 +139,7 @@ function resolveEntrypointInfos(
       continue;
     }
 
-    const key = resolveEntry(entry, index);
-    if (!key) {
-      throw new Error(`Entrypoint not found: ${entry}`);
-    }
-    const info = index.get(key);
+    const info = index.get(classified.key);
     if (!info) {
       throw new Error(`Entrypoint not found: ${entry}`);
     }
@@ -372,8 +356,12 @@ export function runReach(options: ReachRunOptions): ReachResult {
   const entryKeys: string[] = [];
 
   for (const entry of options.entries) {
-    if (isFileEntrypoint(entry)) {
-      const infos = resolveEntrypointInfos(index, [entry]);
+    const classified = classifyEntrypoint(entry, index);
+    if (classified.kind === "file") {
+      const infos = exportsInFile(classified.file, index);
+      if (infos.length === 0) {
+        throw new Error(`No exported entrypoints in ${classified.file}`);
+      }
       for (const info of infos) {
         if (!entryKeys.includes(info.key)) entryKeys.push(info.key);
         const tree = buildCallTreeFromInfo(info, index, maxDepth);
@@ -387,11 +375,7 @@ export function runReach(options: ReachRunOptions): ReachResult {
       continue;
     }
 
-    const key = resolveEntry(entry, index);
-    if (!key) {
-      throw new Error(`Entrypoint not found: ${entry}`);
-    }
-    if (!entryKeys.includes(key)) entryKeys.push(key);
+    if (!entryKeys.includes(classified.key)) entryKeys.push(classified.key);
     const found = findReachPaths(entry, targetKey, index, maxDepth);
     for (const path of found) {
       pathResults.push({

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { outdent } from "outdent";
 import {
-  isFileEntrypoint,
+  classifyEntrypoint,
   matchEntrypointFiles,
   resolveFileEntrypoints,
 } from "../src/calltree.js";
@@ -29,18 +29,37 @@ function fn(
   };
 }
 
-describe("file entrypoint detection", () => {
-  test("treats paths and source extensions as files", () => {
-    expect(isFileEntrypoint("src/routes.ts")).toBe(true);
-    expect(isFileEntrypoint("./packages/api/src/boot.ts")).toBe(true);
-    expect(isFileEntrypoint("routes.ts")).toBe(true);
-    expect(isFileEntrypoint("app.py")).toBe(true);
+describe("entrypoint classification", () => {
+  test("classifies by indexed file lookup, not string shape", () => {
+    const index = buildIndex([
+      fn("boot", "src/boot.ts", ["run"], true),
+      fn("run", "src/boot.ts", [], false),
+    ]);
+
+    expect(classifyEntrypoint("src/boot.ts", index)).toEqual({
+      kind: "file",
+      file: "src/boot.ts",
+    });
+    expect(classifyEntrypoint("boot.ts", index)).toEqual({
+      kind: "file",
+      file: "src/boot.ts",
+    });
+    expect(classifyEntrypoint("boot", index)).toEqual({
+      kind: "symbol",
+      key: "boot",
+    });
   });
 
-  test("leaves symbol names alone", () => {
-    expect(isFileEntrypoint("createAgentSession")).toBe(false);
-    expect(isFileEntrypoint("PiService.createAgentSession")).toBe(false);
-    expect(isFileEntrypoint("new Foo")).toBe(false);
+  test("path-shaped strings that are not indexed stay symbols / not-found", () => {
+    const index = buildIndex([fn("boot", "src/boot.ts", [], true)]);
+
+    expect(classifyEntrypoint("boot", index).kind).toBe("symbol");
+    expect(() => classifyEntrypoint("src/missing.ts", index)).toThrow(
+      /Entrypoint not found/,
+    );
+    expect(() => classifyEntrypoint("packages/api/src/routes.ts", index)).toThrow(
+      /Entrypoint not found/,
+    );
   });
 });
 

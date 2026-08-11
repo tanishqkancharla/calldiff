@@ -100,7 +100,7 @@ function emitAsciiOrData(
 const entryOption = z
   .union([z.string(), z.array(z.string())])
   .describe(
-    "Entrypoint(s): functionName, ClassName.method, or a source file path (expands to that file's exports)",
+    "Entrypoint(s): functionName, ClassName.method, or an indexed source file path (expands to that file's exports)",
   );
 
 const maxDepthOption = z.coerce

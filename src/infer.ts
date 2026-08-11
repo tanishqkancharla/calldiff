@@ -3,10 +3,9 @@ import { allFunctions, flattenCallKeys } from "./extract.js";
 import {
   buildCallTree,
   buildCallTreeFromInfo,
-  isFileEntrypoint,
-  matchEntrypointFiles,
+  classifyEntrypointAcross,
+  exportsInFile,
   resolveEntry,
-  resolveFileEntrypoints,
 } from "./calltree.js";
 import { diffTrees, treeHasChanges } from "./diff.js";
 import type { DiffNode, FunctionInfo } from "./types.js";
@@ -80,51 +79,29 @@ function changedKeys(
     .sort((a, b) => a.localeCompare(b));
 }
 
-function fileExistsInIndex(entry: string, index: FunctionIndex): string[] {
-  return matchEntrypointFiles(
-    entry,
-    allFunctions(index).map((fn) => fn.file),
-  );
-}
-
-function assertFileEntrypoints(
-  entry: string,
+function fileExportsAcross(
+  file: string,
   before: FunctionIndex,
   after: FunctionIndex,
 ): FunctionInfo[] {
-  const fromBefore = resolveFileEntrypoints(entry, before);
-  const fromAfter = resolveFileEntrypoints(entry, after);
-  if (fromBefore.length > 0 || fromAfter.length > 0) {
-    const byKey = new Map<string, FunctionInfo>();
-    for (const info of [...fromBefore, ...fromAfter]) {
-      if (!byKey.has(info.key)) byKey.set(info.key, info);
-    }
-    return [...byKey.values()].sort((a, b) => {
-      if (a.label !== b.label) return a.label < b.label ? -1 : 1;
-      return a.key < b.key ? -1 : a.key > b.key ? 1 : 0;
-    });
+  const fromBefore = exportsInFile(file, before);
+  const fromAfter = exportsInFile(file, after);
+  if (fromBefore.length === 0 && fromAfter.length === 0) {
+    throw new Error(`No exported entrypoints in ${file}`);
   }
-
-  const matched = [
-    ...new Set([
-      ...fileExistsInIndex(entry, before),
-      ...fileExistsInIndex(entry, after),
-    ]),
-  ].sort();
-  if (matched.length === 0) {
-    throw new Error(`Entrypoint file not found: ${entry}`);
+  const byKey = new Map<string, FunctionInfo>();
+  for (const info of [...fromBefore, ...fromAfter]) {
+    if (!byKey.has(info.key)) byKey.set(info.key, info);
   }
-  if (matched.length > 1) {
-    throw new Error(
-      `Ambiguous entrypoint file: ${entry} matches ${matched.join(", ")}. Use a more specific path.`,
-    );
-  }
-  throw new Error(`No exported entrypoints in ${matched[0]}`);
+  return [...byKey.values()].sort((a, b) => {
+    if (a.label !== b.label) return a.label < b.label ? -1 : 1;
+    return a.key < b.key ? -1 : a.key > b.key ? 1 : 0;
+  });
 }
 
 /**
  * Infer entrypoints: exported functions whose expanded call trees differ,
- * plus any explicitly requested entries (symbols or source file paths).
+ * plus any explicitly requested entries (symbols or indexed source files).
  */
 export function inferEntries(
   before: FunctionIndex,
@@ -135,15 +112,14 @@ export function inferEntries(
   if (explicit.length > 0) {
     const entries: string[] = [];
     for (const entry of explicit) {
-      if (isFileEntrypoint(entry)) {
-        for (const info of assertFileEntrypoints(entry, before, after)) {
+      const classified = classifyEntrypointAcross(entry, before, after);
+      if (classified.kind === "file") {
+        for (const info of fileExportsAcross(classified.file, before, after)) {
           if (!entries.includes(info.key)) entries.push(info.key);
         }
         continue;
       }
-      const key = resolveEntry(entry, after) ?? resolveEntry(entry, before);
-      if (!key) throw new Error(`Entrypoint not found: ${entry}`);
-      if (!entries.includes(key)) entries.push(key);
+      if (!entries.includes(classified.key)) entries.push(classified.key);
     }
     return entries;
   }
@@ -164,7 +140,7 @@ export function inferEntries(
 
 /**
  * Expand explicit `-e` values into concrete definitions for diffing.
- * File paths pin to exported symbols in that file (both snapshots).
+ * Indexed file paths pin to exported symbols in that file (both snapshots).
  */
 export function resolveExplicitDiffEntries(
   before: FunctionIndex,
@@ -186,22 +162,20 @@ export function resolveExplicitDiffEntries(
   const seen = new Set<string>();
 
   for (const entry of explicit) {
-    if (isFileEntrypoint(entry)) {
-      const infos = assertFileEntrypoints(entry, before, after);
-      const file =
-        infos[0]?.file ??
-        fileExistsInIndex(entry, after)[0] ??
-        fileExistsInIndex(entry, before)[0];
-      if (!file) throw new Error(`Entrypoint file not found: ${entry}`);
-
+    const classified = classifyEntrypointAcross(entry, before, after);
+    if (classified.kind === "file") {
+      const file = classified.file;
       const keys = [
         ...new Set(
           [
-            ...resolveFileEntrypoints(entry, before),
-            ...resolveFileEntrypoints(entry, after),
+            ...exportsInFile(file, before),
+            ...exportsInFile(file, after),
           ].map((info) => info.key),
         ),
       ].sort((a, b) => a.localeCompare(b));
+      if (keys.length === 0) {
+        throw new Error(`No exported entrypoints in ${file}`);
+      }
 
       for (const key of keys) {
         const id = `${file}\0${key}`;
@@ -218,11 +192,9 @@ export function resolveExplicitDiffEntries(
       continue;
     }
 
-    const key = resolveEntry(entry, after) ?? resolveEntry(entry, before);
-    if (!key) throw new Error(`Entrypoint not found: ${entry}`);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push({ key });
+    if (seen.has(classified.key)) continue;
+    seen.add(classified.key);
+    out.push({ key: classified.key });
   }
 
   return out;

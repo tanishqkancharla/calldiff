@@ -1,7 +1,9 @@
 export { cli, normalizeArgv } from "./cli.js";
 export {
   buildCallTree,
-  isFileEntrypoint,
+  classifyEntrypoint,
+  classifyEntrypointAcross,
+  exportsInFile,
   matchEntrypointFiles,
   normalizeEntryPath,
   resolveAllEntries,
