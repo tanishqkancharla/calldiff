@@ -1,14 +1,14 @@
 /**
  * Detect JS/TS re-exports so missing-entry errors can hint at barrel files.
  *
- * Uses source text (not a second tree-sitter parse) so indexing stays cheap and
- * does not contend with the main extractor parser.
+ * Uses source text (not tree-sitter) so indexing stays cheap and does not
+ * contend with the main extractor parser under parallel CLI tests.
  */
 import { dirname, join, normalize } from "node:path";
 import type { SnapshotFile } from "./git.js";
 import { readSnapshotFiles } from "./git.js";
 import { detectLanguage } from "./languages/registry.js";
-import type { FunctionInfo, Snapshot } from "./types.js";
+import type { Snapshot } from "./types.js";
 
 export type ReexportInfo = {
   /** Exported binding name, or `"*"` for `export * from`. */
@@ -35,8 +35,7 @@ export function collectReexports(file: string, source: string): ReexportInfo[] {
   const out: ReexportInfo[] = [];
 
   // export { a, b as c, default as d } from "...";
-  const namedRe =
-    /export\s*\{([^}]*)\}\s*from\s*['"]([^'"]+)['"]/g;
+  const namedRe = /export\s*\{([^}]*)\}\s*from\s*['"]([^'"]+)['"]/g;
   for (const match of source.matchAll(namedRe)) {
     const fromModule = match[2]!;
     for (const part of match[1]!.split(",")) {
@@ -55,6 +54,42 @@ export function collectReexports(file: string, source: string): ReexportInfo[] {
   }
 
   return out;
+}
+
+/** Binding names a module defines and exports (not re-exports). */
+export function exportedBindingNames(source: string): string[] {
+  const names = new Set<string>();
+
+  const declRe =
+    /export\s+(?:default\s+)?(?:async\s+)?(?:function\*?|class|const|let|var)\s+([A-Za-z_$][\w$]*)/g;
+  for (const match of source.matchAll(declRe)) {
+    names.add(match[1]!);
+  }
+
+  // export default function () {} / export default class {} — treat as "default"
+  if (
+    /export\s+default\s+(?:async\s+)?(?:function\*?|class)\b/.test(source) ||
+    /export\s+default\s+/.test(source)
+  ) {
+    // only add default when it's an anonymous default export form
+    if (/export\s+default\s+(?:async\s+)?(?:function\*?|class)\s*[\(<]/.test(source)) {
+      names.add("default");
+    }
+  }
+
+  // Local `export { foo, bar as baz }` (no from)
+  const localClauseRe = /export\s*\{([^}]*)\}(?!\s*from)/g;
+  for (const match of source.matchAll(localClauseRe)) {
+    for (const part of match[1]!.split(",")) {
+      const trimmed = part.trim();
+      if (!trimmed) continue;
+      const bits = trimmed.split(/\s+as\s+/i);
+      const exportedName = (bits[bits.length - 1] ?? "").trim();
+      if (exportedName) names.add(exportedName);
+    }
+  }
+
+  return [...names];
 }
 
 function moduleCandidates(fromFile: string, specifier: string): string[] {
@@ -99,7 +134,6 @@ export function expandReexports(
   snapshot: Snapshot,
   records: ReexportInfo[],
   availableFiles: SnapshotFile[],
-  extract: (file: string, source: string) => FunctionInfo[],
 ): ReexportInfo[] {
   const available = new Map(availableFiles.map((f) => [f.path, f]));
   const named: ReexportInfo[] = [];
@@ -131,24 +165,13 @@ export function expandReexports(
   const sources = readSnapshotFiles(cwd, snapshot, toRead);
   for (const [path, source] of sources) {
     const barrels = starByTarget.get(path) ?? [];
-    const exported = extract(path, source).filter((fn) => fn.exported);
-    for (const barrel of barrels) {
-      for (const fn of exported) {
-        const bare = fn.key.includes(".")
-          ? (fn.key.split(".").pop() ?? fn.key)
-          : fn.key;
+    for (const name of exportedBindingNames(source)) {
+      for (const barrel of barrels) {
         named.push({
-          name: bare,
+          name,
           file: barrel.file,
           fromModule: barrel.fromModule,
         });
-        if (bare !== fn.key) {
-          named.push({
-            name: fn.key,
-            file: barrel.file,
-            fromModule: barrel.fromModule,
-          });
-        }
       }
     }
   }

@@ -193,6 +193,8 @@ export const cli = Cli.create("calldiff", {
   description:
     "Diff call stacks across git commits for agentic code review (22 languages)",
   version: readVersion(),
+  // Detached npm registry probes can stall CLI subprocesses under test load.
+  update: false,
   hint: "Commands: diff (compare two trees), tree (view one tree), reach (paths between symbols). Path filters are trailing positionals (a leading -- is also accepted). Use --format json for structured agent output.",
   sync: {
     // One skill file covering all commands (default incur depth is 1 = per-command).

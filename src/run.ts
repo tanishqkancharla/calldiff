@@ -2,7 +2,6 @@ import { buildCallTree, resolveEntry } from "./calltree.js";
 import {
   buildIndex,
   extractCached,
-  extractFunctions,
   getIndexReexports,
   setIndexReexports,
 } from "./extract.js";
@@ -126,7 +125,6 @@ function loadIndex(
         snapshot,
         reexportRecords,
         listSnapshotFiles(cwd, snapshot, []),
-        extractFunctions,
       )
     : reexportRecords;
   setIndexReexports(index, expanded);
