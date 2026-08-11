@@ -94,6 +94,8 @@ export function workspace(files: Record<string, string> = {}): WorkspaceHost {
         {
           cwd: root,
           encoding: "utf8",
+          // Keep grammar installs / cold starts from hanging the suite forever.
+          timeout: 30_000,
           env: {
             ...process.env,
             // Keep grammar cache shared with the vitest env.

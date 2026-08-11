@@ -1,18 +1,13 @@
 /**
  * Detect JS/TS re-exports so missing-entry errors can hint at barrel files.
+ *
+ * Uses source text (not a second tree-sitter parse) so indexing stays cheap and
+ * does not contend with the main extractor parser.
  */
 import { dirname, join, normalize } from "node:path";
-import Parser from "tree-sitter";
 import type { SnapshotFile } from "./git.js";
 import { readSnapshotFiles } from "./git.js";
-import { loadGrammarPackage, resolveLanguage } from "./languages/grammars.js";
 import { detectLanguage } from "./languages/registry.js";
-import {
-  childByType,
-  namedChildren,
-  type SyntaxNode,
-  type Tree,
-} from "./languages/types.js";
 import type { FunctionInfo, Snapshot } from "./types.js";
 
 export type ReexportInfo = {
@@ -24,8 +19,6 @@ export type ReexportInfo = {
   fromModule: string;
 };
 
-const parser = new Parser();
-
 function isJsTs(file: string): boolean {
   const lang = detectLanguage(file)?.id;
   return (
@@ -36,61 +29,32 @@ function isJsTs(file: string): boolean {
   );
 }
 
-function stringLiteralValue(node: SyntaxNode | null): string | null {
-  if (!node || node.type !== "string") return null;
-  const raw = node.text;
-  if (raw.length < 2) return null;
-  return raw.slice(1, -1);
-}
-
-function exportedNameFromSpecifier(spec: SyntaxNode): string | null {
-  // `foo` / `foo as bar` / `default as bar`
-  const children = namedChildren(spec);
-  if (children.length === 0) return null;
-  if (children.length === 1) return children[0]!.text;
-  // last identifier is the exported name
-  return children[children.length - 1]!.text;
-}
-
-function collectFromTree(file: string, tree: Tree): ReexportInfo[] {
-  const out: ReexportInfo[] = [];
-  for (const stmt of namedChildren(tree.rootNode)) {
-    if (stmt.type !== "export_statement") continue;
-
-    const from = stringLiteralValue(childByType(stmt, "string"));
-    if (!from) continue;
-
-    const clause = childByType(stmt, "export_clause");
-    if (clause) {
-      for (const spec of namedChildren(clause)) {
-        if (spec.type !== "export_specifier") continue;
-        const name = exportedNameFromSpecifier(spec);
-        if (name) out.push({ name, file, fromModule: from });
-      }
-      continue;
-    }
-
-    // `export * from "..."` (not `export * as ns from`)
-    const ns = childByType(stmt, "namespace_export");
-    if (ns) continue;
-    if (stmt.text.includes("*")) {
-      out.push({ name: "*", file, fromModule: from });
-    }
-  }
-  return out;
-}
-
 /** Collect named / star re-exports from a JS or TS source file. */
 export function collectReexports(file: string, source: string): ReexportInfo[] {
   if (!isJsTs(file)) return [];
-  const extractor = detectLanguage(file);
-  if (!extractor) return [];
+  const out: ReexportInfo[] = [];
 
-  const mod = loadGrammarPackage(extractor.grammarPackage);
-  const language = resolveLanguage(mod, extractor.grammarExport);
-  parser.setLanguage(language as Parser.Language);
-  const tree = parser.parse(source);
-  return collectFromTree(file, tree);
+  // export { a, b as c, default as d } from "...";
+  const namedRe =
+    /export\s*\{([^}]*)\}\s*from\s*['"]([^'"]+)['"]/g;
+  for (const match of source.matchAll(namedRe)) {
+    const fromModule = match[2]!;
+    for (const part of match[1]!.split(",")) {
+      const trimmed = part.trim();
+      if (!trimmed) continue;
+      const bits = trimmed.split(/\s+as\s+/i);
+      const exportedName = (bits[bits.length - 1] ?? "").trim();
+      if (exportedName) out.push({ name: exportedName, file, fromModule });
+    }
+  }
+
+  // export * from "..."  (not export * as ns from)
+  const starRe = /export\s*\*\s*from\s*['"]([^'"]+)['"]/g;
+  for (const match of source.matchAll(starRe)) {
+    out.push({ name: "*", file, fromModule: match[1]! });
+  }
+
+  return out;
 }
 
 function moduleCandidates(fromFile: string, specifier: string): string[] {
@@ -170,7 +134,6 @@ export function expandReexports(
     const exported = extract(path, source).filter((fn) => fn.exported);
     for (const barrel of barrels) {
       for (const fn of exported) {
-        // Prefer the bare binding name readers type at the import site.
         const bare = fn.key.includes(".")
           ? (fn.key.split(".").pop() ?? fn.key)
           : fn.key;

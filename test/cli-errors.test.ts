@@ -6,7 +6,8 @@ import { workspace } from "./workspace.js";
 const src = outdent({ trimTrailingNewline: false });
 
 describe("CLI failure reporting (issue #24)", () => {
-  test("tree missing entrypoint writes code/message to stderr only", () => {
+  // spawnSync + cold tsx can exceed the default 5s under parallel load
+  test("tree missing entrypoint writes code/message to stderr only", { timeout: 15_000 }, () => {
     const host = workspace({
       "/src/app.ts": src`
         export function boot() {}
@@ -22,7 +23,7 @@ describe("CLI failure reporting (issue #24)", () => {
     expect(result.stderr).not.toContain("hint:");
   });
 
-  test("reach missing target writes to stderr only", () => {
+  test("reach missing target writes to stderr only", { timeout: 15_000 }, () => {
     const host = workspace({
       "/src/app.ts": src`
         export function boot() {
@@ -40,7 +41,7 @@ describe("CLI failure reporting (issue #24)", () => {
     expect(result.stderr).toContain('message: "Target not found: missingTarget"');
   });
 
-  test("named re-export hints the barrel file", () => {
+  test("named re-export hints the barrel file", { timeout: 15_000 }, () => {
     const host = workspace({
       "/src/container.ts": src`
         export function createClient() {
@@ -64,7 +65,7 @@ describe("CLI failure reporting (issue #24)", () => {
     );
   });
 
-  test("star re-export hints the barrel file", () => {
+  test("star re-export hints the barrel file", { timeout: 15_000 }, () => {
     const host = workspace({
       "/src/container.ts": src`
         export function createClient() {
@@ -86,7 +87,7 @@ describe("CLI failure reporting (issue #24)", () => {
     );
   });
 
-  test("existing empty-bodied entry still prints the header on stdout", () => {
+  test("existing empty-bodied entry still prints the header on stdout", { timeout: 15_000 }, () => {
     const host = workspace({
       "/src/app.ts": src`
         export function someRealFn() {}
