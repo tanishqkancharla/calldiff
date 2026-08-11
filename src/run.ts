@@ -1,5 +1,11 @@
 import { buildCallTree, resolveEntry } from "./calltree.js";
-import { buildIndex, extractCached } from "./extract.js";
+import {
+  buildIndex,
+  extractCached,
+  extractFunctions,
+  getIndexReexports,
+  setIndexReexports,
+} from "./extract.js";
 import {
   assertGitRepo,
   describeSnapshot,
@@ -12,7 +18,14 @@ import {
 } from "./git.js";
 import { diffEntry, inferEntries } from "./infer.js";
 import { findReachPaths } from "./reach.js";
+import {
+  collectReexports,
+  expandReexports,
+  reexportHint,
+  type ReexportInfo,
+} from "./reexport.js";
 import { renderDiff, renderTree } from "./render.js";
+import { SymbolNotFoundError } from "./errors.js";
 import type { ExtractionCache, FunctionIndex } from "./extract.js";
 import type { SnapshotFile } from "./git.js";
 import type {
@@ -24,6 +37,8 @@ import type {
   Snapshot,
   TreeResult,
 } from "./types.js";
+
+export { SymbolNotFoundError } from "./errors.js";
 
 export type DiffRunOptions = {
   from?: string;
@@ -69,9 +84,11 @@ function loadIndex(
 ): FunctionIndex {
   const files = listSnapshotFiles(cwd, snapshot, pathFilters);
   const extracted = new Map<string, FunctionInfo[]>();
+  const reexportRecords: ReexportInfo[] = [];
   const extract = (file: SnapshotFile, source: string): void => {
     try {
       extracted.set(file.path, extractCached(file.path, source, cache));
+      reexportRecords.push(...collectReexports(file.path, source));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error(
@@ -99,15 +116,32 @@ function loadIndex(
   for (const file of files) {
     functions.push(...(extracted.get(file.path) ?? []));
   }
-  return buildIndex(functions);
+  const index = buildIndex(functions);
+
+  // Star re-exports may point outside the path filter; peek there for hints only.
+  const allFiles = listSnapshotFiles(cwd, snapshot, []);
+  const expanded = expandReexports(
+    cwd,
+    snapshot,
+    reexportRecords,
+    allFiles,
+    extractFunctions,
+  );
+  setIndexReexports(index, expanded);
+  return index;
 }
 
 function resolveEntries(index: FunctionIndex, explicit: string[]): string[] {
   const resolved: string[] = [];
+  const reexports = getIndexReexports(index);
   for (const entry of explicit) {
     const key = resolveEntry(entry, index);
     if (!key) {
-      throw new Error(`Entrypoint not found: ${entry}`);
+      throw new SymbolNotFoundError(
+        "entrypoint",
+        entry,
+        reexportHint(entry, reexports),
+      );
     }
     if (!resolved.includes(key)) resolved.push(key);
   }
@@ -167,7 +201,10 @@ export function runDiff(options: DiffRunOptions = {}): DiffResult {
   const after = loadIndex(cwd, to, resolvedPaths, extractionCache);
   extractionCache.clear();
 
-  const entries = inferEntries(before, after, entriesOpt, maxDepth);
+  const hintFor = (entry: string) =>
+    reexportHint(entry, getIndexReexports(after)) ??
+    reexportHint(entry, getIndexReexports(before));
+  const entries = inferEntries(before, after, entriesOpt, maxDepth, hintFor);
 
   const fromLabel = describeSnapshot(from);
   const toLabel = describeSnapshot(to);
@@ -287,7 +324,11 @@ export function runReach(options: ReachRunOptions): ReachResult {
   const entries = resolveEntries(index, options.entries);
   const targetKey = resolveEntry(options.to, index);
   if (!targetKey) {
-    throw new Error(`Target not found: ${options.to}`);
+    throw new SymbolNotFoundError(
+      "target",
+      options.to,
+      reexportHint(options.to, getIndexReexports(index)),
+    );
   }
   const refLabel = describeSnapshot(snapshot);
 

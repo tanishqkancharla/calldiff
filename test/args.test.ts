@@ -1,31 +1,43 @@
 import { describe, expect, test } from "vitest";
-import { cli, hasTokenFlag, normalizeArgv } from "../src/cli.js";
+import {
+  cli,
+  hasTokenFlag,
+  normalizeArgv,
+  wrapCliStdout,
+} from "../src/cli.js";
 
 async function invoke(
   argv: string[],
-): Promise<{ stdout: string; code: number | undefined }> {
+): Promise<{ stdout: string; stderr: string; code: number | undefined }> {
   let stdout = "";
+  let stderr = "";
   let code: number | undefined;
   // The default ASCII path writes to process.stdout itself, so capture both
-  // that and incur's injected writer.
-  const realWrite = process.stdout.write.bind(process.stdout);
+  // that and incur's injected writer. Failures go to stderr (see wrapCliStdout).
+  const realStdoutWrite = process.stdout.write.bind(process.stdout);
+  const realStderrWrite = process.stderr.write.bind(process.stderr);
   process.stdout.write = ((chunk: unknown) => {
     stdout += String(chunk);
     return true;
   }) as typeof process.stdout.write;
+  process.stderr.write = ((chunk: unknown) => {
+    stderr += String(chunk);
+    return true;
+  }) as typeof process.stderr.write;
   try {
     await cli.serve(normalizeArgv(argv), {
-      stdout: (s) => {
+      stdout: wrapCliStdout((s) => {
         stdout += s;
-      },
+      }),
       exit: (c) => {
         code = c;
       },
     });
   } finally {
-    process.stdout.write = realWrite;
+    process.stdout.write = realStdoutWrite;
+    process.stderr.write = realStderrWrite;
   }
-  return { stdout, code };
+  return { stdout, stderr, code };
 }
 
 describe("normalizeArgv", () => {
@@ -118,6 +130,18 @@ describe("calldiff CLI (incur)", () => {
     const { code } = await invoke(["reach", "-e", "boot"]);
     expect(code).toBeTruthy();
     expect(code).toBeGreaterThan(0);
+  });
+
+  test("missing entrypoint failure goes to stderr", async () => {
+    const { stdout, stderr, code } = await invoke([
+      "tree",
+      "-e",
+      "noSuchSymbolAnywhere",
+    ]);
+    expect(code).toBe(1);
+    expect(stdout).toBe("");
+    expect(stderr).toMatch(/TREE_FAILED/);
+    expect(stderr).toMatch(/Entrypoint not found/);
   });
 
   test("unknown flag fails", async () => {

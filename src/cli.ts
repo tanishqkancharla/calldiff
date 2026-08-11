@@ -2,8 +2,8 @@
 import { readFileSync, realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { Cli, z } from "incur";
-import { runDiff, runReach, runTree } from "./run.js";
+import { Cli, Formatter, z } from "incur";
+import { SymbolNotFoundError, runDiff, runReach, runTree } from "./run.js";
 import type { DiffResult, ReachResult, TreeResult } from "./types.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -45,6 +45,79 @@ let tokenFlagActive = false;
 export function normalizeArgv(argv: string[]): string[] {
   tokenFlagActive = hasTokenFlag(argv);
   return argv.filter((token) => token !== "--");
+}
+
+/**
+ * When true, incur's next stdout write is discarded — we already emitted the
+ * failure block on stderr via {@link fail}.
+ */
+let suppressNextStdout = false;
+
+/**
+ * Wrap incur's stdout writer so {@link fail} can keep success on stdout and
+ * errors on stderr without a duplicate incur error write.
+ */
+export function wrapCliStdout(
+  inner?: (s: string) => void,
+): (s: string) => void {
+  return (s: string) => {
+    if (suppressNextStdout) {
+      suppressNextStdout = false;
+      return;
+    }
+    if (inner) inner(s);
+    else process.stdout.write(s);
+  };
+}
+
+type FailContext = {
+  error: (options: {
+    code: string;
+    message: string;
+    exitCode?: number;
+  }) => never;
+  format: Formatter.Format;
+  formatExplicit: boolean;
+};
+
+/**
+ * Report a command failure on stderr (not stdout) and exit non-zero.
+ * Keeps successful ASCII trees pipeable without mixing in `code:` blocks.
+ */
+function fail(
+  c: FailContext,
+  options: {
+    code: string;
+    message: string;
+    hint?: string;
+    exitCode?: number;
+  },
+): never {
+  const payload: Record<string, string> = {
+    code: options.code,
+    message: options.message,
+  };
+  if (options.hint) payload.hint = options.hint;
+
+  const format = c.formatExplicit ? c.format : "toon";
+  const text = Formatter.format(payload, format);
+  process.stderr.write(text.endsWith("\n") ? text : `${text}\n`);
+
+  suppressNextStdout = true;
+  return c.error({
+    code: options.code,
+    message: options.message,
+    exitCode: options.exitCode,
+  });
+}
+
+function failureMessage(error: unknown): { message: string; hint?: string } {
+  if (error instanceof SymbolNotFoundError) {
+    return { message: error.message, hint: error.hint };
+  }
+  return {
+    message: error instanceof Error ? error.message : String(error),
+  };
 }
 
 function entriesFromOption(
@@ -186,9 +259,11 @@ export const cli = Cli.create("calldiff", {
           color: !c.formatExplicit && !c.agent,
         });
       } catch (error) {
-        return c.error({
+        const { message, hint } = failureMessage(error);
+        return fail(c, {
           code: "DIFF_FAILED",
-          message: error instanceof Error ? error.message : String(error),
+          message,
+          hint,
           exitCode: 1,
         });
       }
@@ -238,7 +313,7 @@ export const cli = Cli.create("calldiff", {
     run(c) {
       const entries = entriesFromOption(c.options.entry) ?? [];
       if (entries.length === 0) {
-        return c.error({
+        return fail(c, {
           code: "MISSING_ENTRY",
           message: "calldiff tree requires --entry / -e",
           exitCode: 2,
@@ -256,9 +331,11 @@ export const cli = Cli.create("calldiff", {
         });
         return emitAsciiOrData(c, result);
       } catch (error) {
-        return c.error({
+        const { message, hint } = failureMessage(error);
+        return fail(c, {
           code: "TREE_FAILED",
-          message: error instanceof Error ? error.message : String(error),
+          message,
+          hint,
           exitCode: 1,
         });
       }
@@ -296,14 +373,14 @@ export const cli = Cli.create("calldiff", {
     run(c) {
       const entries = entriesFromOption(c.options.entry) ?? [];
       if (entries.length === 0) {
-        return c.error({
+        return fail(c, {
           code: "MISSING_ENTRY",
           message: "calldiff reach requires --entry / -e",
           exitCode: 2,
         });
       }
       if (!c.options.to) {
-        return c.error({
+        return fail(c, {
           code: "MISSING_TARGET",
           message: "calldiff reach requires --to <symbol>",
           exitCode: 2,
@@ -322,9 +399,11 @@ export const cli = Cli.create("calldiff", {
         });
         return emitAsciiOrData(c, result);
       } catch (error) {
-        return c.error({
+        const { message, hint } = failureMessage(error);
+        return fail(c, {
           code: "REACH_FAILED",
-          message: error instanceof Error ? error.message : String(error),
+          message,
+          hint,
           exitCode: 1,
         });
       }
@@ -350,8 +429,12 @@ function executedAsCli(): boolean {
 }
 
 if (executedAsCli()) {
-  cli.serve(normalizeArgv(process.argv.slice(2))).catch((error) => {
-    console.error(error instanceof Error ? error.message : error);
-    process.exitCode = 1;
-  });
+  cli
+    .serve(normalizeArgv(process.argv.slice(2)), {
+      stdout: wrapCliStdout(),
+    })
+    .catch((error) => {
+      console.error(error instanceof Error ? error.message : error);
+      process.exitCode = 1;
+    });
 }
