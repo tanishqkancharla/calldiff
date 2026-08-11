@@ -21,7 +21,8 @@ Diff call stacks between two git trees
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--entry` | `unknown` |  | Entrypoint(s): functionName, ClassName.method, or indexed source file path |
+| `--entry` | `unknown` |  | Entrypoint symbol(s): functionName or ClassName.method |
+| `--file` | `unknown` |  | Entrypoint file(s): indexed source path; expands to that file's exports |
 | `--maxDepth` | `number` | `12` | Max call-tree depth |
 | `--locs` | `boolean` | `false` | Show call-site source locations (file:line) |
 | `--from` | `string` |  | Left / "before" tree |
@@ -42,8 +43,8 @@ calldiff diff abc123 def456
 # Force entrypoints
 calldiff diff main feature --entry createAgentSession
 
-# File path expands to that file's exports
-calldiff diff main feature --entry src/routes.ts
+# File expands to that file's exports
+calldiff diff main feature --file src/routes.ts
 ```
 
 > Semantics match git diff: no refs → HEAD vs worktree; one ref → that vs worktree; two refs → compare those trees.
@@ -65,7 +66,8 @@ Find all call paths from an entrypoint to a target symbol
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--entry` | `unknown` |  | Entrypoint(s): functionName, ClassName.method, or indexed source file path |
+| `--entry` | `unknown` |  | Entrypoint symbol(s): functionName or ClassName.method |
+| `--file` | `unknown` |  | Entrypoint file(s): indexed source path; expands to that file's exports |
 | `--to` | `string` |  | Target symbol to reach (functionName or ClassName.method) |
 | `--maxDepth` | `number` | `12` | Max call-tree depth |
 | `--locs` | `boolean` | `false` | Show call-site source locations (file:line) |
@@ -78,6 +80,9 @@ calldiff reach --entry runCheckout --to sendEmail
 
 # Paths at a commit, limited to a directory
 calldiff reach HEAD examples/checkout --entry runCheckout --to sendEmail
+
+# Paths from every export in a file
+calldiff reach --file packages/api/src/flow.ts --to notify
 ```
 
 ---
@@ -97,7 +102,8 @@ View a call tree (no diff) for one or more entrypoints
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--entry` | `unknown` |  | Entrypoint(s): functionName, ClassName.method, or indexed source file path |
+| `--entry` | `unknown` |  | Entrypoint symbol(s): functionName or ClassName.method |
+| `--file` | `unknown` |  | Entrypoint file(s): indexed source path; expands to that file's exports |
 | `--maxDepth` | `number` | `12` | Max call-tree depth |
 | `--locs` | `boolean` | `false` | Show call-site source locations (file:line) |
 
@@ -111,5 +117,5 @@ calldiff tree --entry createAgentSession
 calldiff tree HEAD --entry PiService.createAgentSession
 
 # Every export in a file
-calldiff tree --entry packages/api/src/routes.ts
+calldiff tree --file packages/api/src/routes.ts
 ```

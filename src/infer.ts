@@ -3,9 +3,10 @@ import { allFunctions, flattenCallKeys } from "./extract.js";
 import {
   buildCallTree,
   buildCallTreeFromInfo,
-  classifyEntrypointAcross,
   exportsInFile,
+  indexedFiles,
   resolveEntry,
+  resolveEntrypointFile,
 } from "./calltree.js";
 import { diffTrees, treeHasChanges } from "./diff.js";
 import type { DiffNode, FunctionInfo } from "./types.js";
@@ -79,29 +80,9 @@ function changedKeys(
     .sort((a, b) => a.localeCompare(b));
 }
 
-function fileExportsAcross(
-  file: string,
-  before: FunctionIndex,
-  after: FunctionIndex,
-): FunctionInfo[] {
-  const fromBefore = exportsInFile(file, before);
-  const fromAfter = exportsInFile(file, after);
-  if (fromBefore.length === 0 && fromAfter.length === 0) {
-    throw new Error(`No exported entrypoints in ${file}`);
-  }
-  const byKey = new Map<string, FunctionInfo>();
-  for (const info of [...fromBefore, ...fromAfter]) {
-    if (!byKey.has(info.key)) byKey.set(info.key, info);
-  }
-  return [...byKey.values()].sort((a, b) => {
-    if (a.label !== b.label) return a.label < b.label ? -1 : 1;
-    return a.key < b.key ? -1 : a.key > b.key ? 1 : 0;
-  });
-}
-
 /**
  * Infer entrypoints: exported functions whose expanded call trees differ,
- * plus any explicitly requested entries (symbols or indexed source files).
+ * plus any explicitly requested symbol entries.
  */
 export function inferEntries(
   before: FunctionIndex,
@@ -112,14 +93,9 @@ export function inferEntries(
   if (explicit.length > 0) {
     const entries: string[] = [];
     for (const entry of explicit) {
-      const classified = classifyEntrypointAcross(entry, before, after);
-      if (classified.kind === "file") {
-        for (const info of fileExportsAcross(classified.file, before, after)) {
-          if (!entries.includes(info.key)) entries.push(info.key);
-        }
-        continue;
-      }
-      if (!entries.includes(classified.key)) entries.push(classified.key);
+      const key = resolveEntry(entry, after) ?? resolveEntry(entry, before);
+      if (!key) throw new Error(`Entrypoint not found: ${entry}`);
+      if (!entries.includes(key)) entries.push(key);
     }
     return entries;
   }
@@ -138,63 +114,63 @@ export function inferEntries(
   return changedKeys(fallback, before, after, maxDepth);
 }
 
-/**
- * Expand explicit `-e` values into concrete definitions for diffing.
- * Indexed file paths pin to exported symbols in that file (both snapshots).
- */
-export function resolveExplicitDiffEntries(
-  before: FunctionIndex,
-  after: FunctionIndex,
-  explicit: string[],
-): Array<{
+export type ExplicitDiffEntry = {
   key: string;
   beforeInfo?: FunctionInfo;
   afterInfo?: FunctionInfo;
   /** When set, trees are built from these file-pinned definitions. */
   file?: string;
-}> {
-  const out: Array<{
-    key: string;
-    beforeInfo?: FunctionInfo;
-    afterInfo?: FunctionInfo;
-    file?: string;
-  }> = [];
+};
+
+/**
+ * Expand explicit `-e` symbols and `--file` paths into concrete diff roots.
+ */
+export function resolveExplicitDiffEntries(
+  before: FunctionIndex,
+  after: FunctionIndex,
+  symbols: string[],
+  files: string[] = [],
+): ExplicitDiffEntry[] {
+  const out: ExplicitDiffEntry[] = [];
   const seen = new Set<string>();
 
-  for (const entry of explicit) {
-    const classified = classifyEntrypointAcross(entry, before, after);
-    if (classified.kind === "file") {
-      const file = classified.file;
-      const keys = [
-        ...new Set(
-          [
-            ...exportsInFile(file, before),
-            ...exportsInFile(file, after),
-          ].map((info) => info.key),
-        ),
-      ].sort((a, b) => a.localeCompare(b));
-      if (keys.length === 0) {
-        throw new Error(`No exported entrypoints in ${file}`);
-      }
+  for (const entry of symbols) {
+    const key = resolveEntry(entry, after) ?? resolveEntry(entry, before);
+    if (!key) throw new Error(`Entrypoint not found: ${entry}`);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ key });
+  }
 
-      for (const key of keys) {
-        const id = `${file}\0${key}`;
-        if (seen.has(id)) continue;
-        seen.add(id);
-        const beforeInfo = allFunctions(before).find(
-          (fn) => fn.file === file && fn.key === key && fn.exported,
-        );
-        const afterInfo = allFunctions(after).find(
-          (fn) => fn.file === file && fn.key === key && fn.exported,
-        );
-        out.push({ key, beforeInfo, afterInfo, file });
-      }
-      continue;
+  for (const entry of files) {
+    const file = resolveEntrypointFile(entry, [
+      ...indexedFiles(before),
+      ...indexedFiles(after),
+    ]);
+    const keys = [
+      ...new Set(
+        [
+          ...exportsInFile(file, before),
+          ...exportsInFile(file, after),
+        ].map((info) => info.key),
+      ),
+    ].sort((a, b) => a.localeCompare(b));
+    if (keys.length === 0) {
+      throw new Error(`No exported entrypoints in ${file}`);
     }
 
-    if (seen.has(classified.key)) continue;
-    seen.add(classified.key);
-    out.push({ key: classified.key });
+    for (const key of keys) {
+      const id = `${file}\0${key}`;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const beforeInfo = allFunctions(before).find(
+        (fn) => fn.file === file && fn.key === key && fn.exported,
+      );
+      const afterInfo = allFunctions(after).find(
+        (fn) => fn.file === file && fn.key === key && fn.exported,
+      );
+      out.push({ key, beforeInfo, afterInfo, file });
+    }
   }
 
   return out;
@@ -230,13 +206,11 @@ export function diffEntry(
         children: [] as [],
       };
 
-  // If function only on one side, mark root accordingly via empty opposite
   if (!hasBefore && hasAfter) {
     const diff = diffTrees(
       { key: afterKey, label: afterTree.label, children: [] },
       afterTree,
     );
-    // Force root added
     return { ...diff, status: "added" };
   }
 

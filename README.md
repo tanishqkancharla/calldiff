@@ -42,11 +42,14 @@ calldiff diff main
 calldiff diff abc123 def456
 calldiff diff --from main --to feature
 
-# force entrypoints (functionName, ClassName.method, or a source file path)
+# force entrypoints (functionName or ClassName.method)
 calldiff diff main feature --entry createAgentSession
 calldiff diff main feature -e PiService.createAgentSession -e boot
-calldiff tree -e src/routes.ts
-calldiff tree -e packages/api/src/boot.ts
+
+# file as entrypoint (every export in that indexed source file)
+calldiff tree --file src/routes.ts
+calldiff tree -F packages/api/src/boot.ts
+calldiff diff main HEAD --file src/routes.ts
 
 # limit to paths (trailing positionals; leading -- also accepted)
 calldiff diff main feature src/lib
@@ -79,9 +82,9 @@ calldiff mcp add      # register as MCP server
 `-` lines were present in **from** and gone in **to**.  
 `+` lines are new in **to**.
 
-If you omit `--entry`, calldiff infers exported functions whose expanded call trees changed (and may show several).
+If you omit `--entry` / `--file`, calldiff infers exported functions whose expanded call trees changed (and may show several).
 
-A `--entry` / `-e` value that uniquely matches an **indexed source file** expands to every **exported** symbol defined in that file (useful in monorepos). Matching is by lookup against the snapshot — exact path, or a unique suffix (`boot.ts` → `packages/api/src/boot.ts`) — not by guessing from the string shape. Ambiguous suffix matches error so you can pass a more specific path; values that match no file are resolved as symbols.
+`--file` / `-F` takes an indexed source path and expands to every **exported** symbol defined in that file (useful in monorepos). Matching is exact path, or a unique suffix (`boot.ts` → `packages/api/src/boot.ts`). Ambiguous matches error so you can pass a more specific path. `--entry` / `-e` is symbols only.
 
 ### `tree`
 
@@ -90,7 +93,7 @@ A `--entry` / `-e` value that uniquely matches an **indexed source file** expand
 | `calldiff tree -e <name>` | working tree |
 | `calldiff tree <ref> -e <name>` | that commit/ref |
 
-Prints a plain ASCII call tree (no `+/−` markers). `--entry` / `-e` is required.
+Prints a plain ASCII call tree (no `+/−` markers). `--entry` / `-e` or `--file` / `-F` is required.
 With `--locs`, each node shows a source location: the root uses the definition
 `file:line`, and children use the **call site** in the parent (`file:line` or
 `file:line-line`) — same idea as LSP Call Hierarchy `fromRanges`, not Go to
@@ -103,7 +106,7 @@ Definition.
 | `calldiff reach -e <from> --to <target>` | working tree |
 | `calldiff reach <ref> -e <from> --to <target>` | that commit/ref |
 
-Prints every call path from the entrypoint to the target (including alternate `if` / `else` arms). Both `--entry` / `-e` and `--to` are required.
+Prints every call path from the entrypoint to the target (including alternate `if` / `else` arms). `--entry` / `-e` or `--file` / `-F`, plus `--to`, are required.
 
 ### Labels
 

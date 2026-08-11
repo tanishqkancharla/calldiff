@@ -1,8 +1,9 @@
 import {
   buildCallTreeFromInfo,
-  classifyEntrypoint,
   exportsInFile,
   resolveEntry,
+  resolveEntrypointFile,
+  indexedFiles,
 } from "./calltree.js";
 import { buildIndex, extractCached } from "./extract.js";
 import {
@@ -38,7 +39,10 @@ import type {
 export type DiffRunOptions = {
   from?: string;
   to?: string;
+  /** Symbol entrypoints (`-e`). */
   entries?: string[];
+  /** File entrypoints (`--file`): expand to that file's exports. */
+  files?: string[];
   paths?: string[];
   cwd?: string;
   maxDepth?: number;
@@ -50,7 +54,8 @@ export type DiffRunOptions = {
 
 export type TreeRunOptions = {
   ref?: string;
-  entries: string[];
+  entries?: string[];
+  files?: string[];
   paths?: string[];
   cwd?: string;
   maxDepth?: number;
@@ -61,7 +66,9 @@ export type TreeRunOptions = {
 export type ReachRunOptions = {
   ref?: string;
   /** Start symbol(s). */
-  entries: string[];
+  entries?: string[];
+  /** Start file(s): every export in the file. */
+  files?: string[];
   /** Target symbol to reach. */
   to: string;
   paths?: string[];
@@ -112,34 +119,20 @@ function loadIndex(
   return buildIndex(functions);
 }
 
-/**
- * Resolve `-e` values to concrete definitions.
- * Indexed file paths expand to every exported symbol defined in that file.
- */
-function resolveEntrypointInfos(
+/** Resolve `-e` symbols to concrete definitions. */
+function resolveSymbolInfos(
   index: FunctionIndex,
-  explicit: string[],
+  symbols: string[],
 ): FunctionInfo[] {
   const resolved: FunctionInfo[] = [];
   const seen = new Set<string>();
 
-  for (const entry of explicit) {
-    const classified = classifyEntrypoint(entry, index);
-    if (classified.kind === "file") {
-      const infos = exportsInFile(classified.file, index);
-      if (infos.length === 0) {
-        throw new Error(`No exported entrypoints in ${classified.file}`);
-      }
-      for (const info of infos) {
-        const id = `${info.file}\0${info.key}\0${info.line ?? ""}`;
-        if (seen.has(id)) continue;
-        seen.add(id);
-        resolved.push(info);
-      }
-      continue;
+  for (const entry of symbols) {
+    const key = resolveEntry(entry, index);
+    if (!key) {
+      throw new Error(`Entrypoint not found: ${entry}`);
     }
-
-    const info = index.get(classified.key);
+    const info = index.get(key);
     if (!info) {
       throw new Error(`Entrypoint not found: ${entry}`);
     }
@@ -150,6 +143,42 @@ function resolveEntrypointInfos(
   }
 
   return resolved;
+}
+
+/** Resolve `--file` paths to exported definitions (file-pinned). */
+function resolveFileInfos(
+  index: FunctionIndex,
+  files: string[],
+): FunctionInfo[] {
+  const resolved: FunctionInfo[] = [];
+  const seen = new Set<string>();
+
+  for (const entry of files) {
+    const file = resolveEntrypointFile(entry, indexedFiles(index));
+    const infos = exportsInFile(file, index);
+    if (infos.length === 0) {
+      throw new Error(`No exported entrypoints in ${file}`);
+    }
+    for (const info of infos) {
+      const id = `${info.file}\0${info.key}\0${info.line ?? ""}`;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      resolved.push(info);
+    }
+  }
+
+  return resolved;
+}
+
+function resolveEntrypointInfos(
+  index: FunctionIndex,
+  symbols: string[],
+  files: string[],
+): FunctionInfo[] {
+  return [
+    ...resolveSymbolInfos(index, symbols),
+    ...resolveFileInfos(index, files),
+  ];
 }
 
 function serializeCallNode(node: CallNode): CallNode {
@@ -182,8 +211,10 @@ export function runDiff(options: DiffRunOptions = {}): DiffResult {
   const cwd = options.cwd ?? process.cwd();
   const maxDepth = options.maxDepth ?? 12;
   const entriesOpt = options.entries ?? [];
+  const filesOpt = options.files ?? [];
   const color = options.color !== false;
   const locs = options.locs === true;
+  const hasExplicit = entriesOpt.length > 0 || filesOpt.length > 0;
 
   assertGitRepo(cwd);
 
@@ -225,8 +256,13 @@ export function runDiff(options: DiffRunOptions = {}): DiffResult {
     asciiParts.push(ascii);
   };
 
-  if (entriesOpt.length > 0) {
-    const explicit = resolveExplicitDiffEntries(before, after, entriesOpt);
+  if (hasExplicit) {
+    const explicit = resolveExplicitDiffEntries(
+      before,
+      after,
+      entriesOpt,
+      filesOpt,
+    );
     for (const item of explicit) {
       const diff = item.file
         ? diffPinnedEntry(
@@ -263,10 +299,9 @@ export function runDiff(options: DiffRunOptions = {}): DiffResult {
   }
 
   if (trees.length === 0) {
-    const message =
-      entriesOpt.length > 0
-        ? "No callstack changes for requested entrypoints."
-        : "No callstack changes for inferred entrypoints.";
+    const message = hasExplicit
+      ? "No callstack changes for requested entrypoints."
+      : "No callstack changes for inferred entrypoints.";
     return {
       mode: "diff",
       from: fromLabel,
@@ -292,6 +327,8 @@ export function runTree(options: TreeRunOptions): TreeResult {
   const maxDepth = options.maxDepth ?? 12;
   const color = options.color !== false;
   const locs = options.locs === true;
+  const symbols = options.entries ?? [];
+  const files = options.files ?? [];
 
   assertGitRepo(cwd);
 
@@ -303,7 +340,7 @@ export function runTree(options: TreeRunOptions): TreeResult {
   if (snapshot.kind === "commit") verifyCommit(cwd, snapshot.ref);
 
   const index = loadIndex(cwd, snapshot, paths);
-  const infos = resolveEntrypointInfos(index, options.entries);
+  const infos = resolveEntrypointInfos(index, symbols, files);
   const refLabel = describeSnapshot(snapshot);
 
   const trees: TreeResult["trees"] = [];
@@ -335,6 +372,8 @@ export function runReach(options: ReachRunOptions): ReachResult {
   const maxDepth = options.maxDepth ?? 12;
   const color = options.color !== false;
   const locs = options.locs === true;
+  const symbols = options.entries ?? [];
+  const files = options.files ?? [];
 
   assertGitRepo(cwd);
 
@@ -355,29 +394,25 @@ export function runReach(options: ReachRunOptions): ReachResult {
   const pathResults: ReachResult["paths"] = [];
   const entryKeys: string[] = [];
 
-  for (const entry of options.entries) {
-    const classified = classifyEntrypoint(entry, index);
-    if (classified.kind === "file") {
-      const infos = exportsInFile(classified.file, index);
-      if (infos.length === 0) {
-        throw new Error(`No exported entrypoints in ${classified.file}`);
-      }
-      for (const info of infos) {
-        if (!entryKeys.includes(info.key)) entryKeys.push(info.key);
-        const tree = buildCallTreeFromInfo(info, index, maxDepth);
-        for (const path of collectPathsTo(tree, targetKey, options.to)) {
-          pathResults.push({
-            ascii: renderTree(path, { color: false, locs }),
-            tree: serializeCallNode(path),
-          });
-        }
-      }
-      continue;
+  for (const entry of symbols) {
+    const key = resolveEntry(entry, index);
+    if (!key) {
+      throw new Error(`Entrypoint not found: ${entry}`);
     }
-
-    if (!entryKeys.includes(classified.key)) entryKeys.push(classified.key);
+    if (!entryKeys.includes(key)) entryKeys.push(key);
     const found = findReachPaths(entry, targetKey, index, maxDepth);
     for (const path of found) {
+      pathResults.push({
+        ascii: renderTree(path, { color: false, locs }),
+        tree: serializeCallNode(path),
+      });
+    }
+  }
+
+  for (const info of resolveFileInfos(index, files)) {
+    if (!entryKeys.includes(info.key)) entryKeys.push(info.key);
+    const tree = buildCallTreeFromInfo(info, index, maxDepth);
+    for (const path of collectPathsTo(tree, targetKey, options.to)) {
       pathResults.push({
         ascii: renderTree(path, { color: false, locs }),
         tree: serializeCallNode(path),

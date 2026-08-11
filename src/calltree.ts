@@ -13,7 +13,7 @@ export function indexedFiles(index: FunctionIndex): string[] {
 }
 
 /**
- * Resolve which indexed source files match an entry string.
+ * Resolve which indexed source files match a `--file` argument.
  * Exact path wins; otherwise a unique suffix match (`routes.ts` → `src/routes.ts`).
  */
 export function matchEntrypointFiles(
@@ -32,56 +32,24 @@ export function matchEntrypointFiles(
     .sort();
 }
 
-export type ClassifiedEntrypoint =
-  | { kind: "file"; file: string }
-  | { kind: "symbol"; key: string };
-
 /**
- * Decide whether `-e` names an indexed file or a symbol — by lookup, not by
- * guessing from the string shape. Unique file match wins; otherwise symbol.
+ * Resolve a `--file` argument to a single indexed source path.
+ * Throws when missing or ambiguous.
  */
-export function classifyEntrypoint(
+export function resolveEntrypointFile(
   entry: string,
-  index: FunctionIndex,
-): ClassifiedEntrypoint {
-  const files = matchEntrypointFiles(entry, indexedFiles(index));
-  if (files.length > 1) {
+  files: Iterable<string>,
+): string {
+  const matched = matchEntrypointFiles(entry, files);
+  if (matched.length === 0) {
+    throw new Error(`Entrypoint file not found: ${entry}`);
+  }
+  if (matched.length > 1) {
     throw new Error(
-      `Ambiguous entrypoint file: ${entry} matches ${files.join(", ")}. Use a more specific path.`,
+      `Ambiguous entrypoint file: ${entry} matches ${matched.join(", ")}. Use a more specific path.`,
     );
   }
-  if (files.length === 1) {
-    return { kind: "file", file: files[0]! };
-  }
-  const key = resolveEntry(entry, index);
-  if (key) return { kind: "symbol", key };
-  throw new Error(`Entrypoint not found: ${entry}`);
-}
-
-/**
- * Like {@link classifyEntrypoint}, but file identity is taken from the union of
- * both snapshots (so a path that exists on only one side still counts as a file).
- */
-export function classifyEntrypointAcross(
-  entry: string,
-  before: FunctionIndex,
-  after: FunctionIndex,
-): ClassifiedEntrypoint {
-  const files = matchEntrypointFiles(entry, [
-    ...indexedFiles(before),
-    ...indexedFiles(after),
-  ]);
-  if (files.length > 1) {
-    throw new Error(
-      `Ambiguous entrypoint file: ${entry} matches ${files.join(", ")}. Use a more specific path.`,
-    );
-  }
-  if (files.length === 1) {
-    return { kind: "file", file: files[0]! };
-  }
-  const key = resolveEntry(entry, after) ?? resolveEntry(entry, before);
-  if (key) return { kind: "symbol", key };
-  throw new Error(`Entrypoint not found: ${entry}`);
+  return matched[0]!;
 }
 
 /** Exported definitions in a concrete source path. */
@@ -95,22 +63,15 @@ export function exportsInFile(
 }
 
 /**
- * Exported definitions in the file matched by `entry`.
- * Throws when the path is ambiguous across multiple indexed files.
- * Returns [] when nothing matches (caller decides not-found vs no-exports).
+ * Exported definitions for a `--file` argument against one index.
+ * Throws when the path is missing/ambiguous; returns [] when the file has no exports.
  */
 export function resolveFileEntrypoints(
   entry: string,
   index: FunctionIndex,
 ): FunctionInfo[] {
-  const matched = matchEntrypointFiles(entry, indexedFiles(index));
-  if (matched.length === 0) return [];
-  if (matched.length > 1) {
-    throw new Error(
-      `Ambiguous entrypoint file: ${entry} matches ${matched.join(", ")}. Use a more specific path.`,
-    );
-  }
-  return exportsInFile(matched[0]!, index);
+  const file = resolveEntrypointFile(entry, indexedFiles(index));
+  return exportsInFile(file, index);
 }
 
 function displayCallLabel(

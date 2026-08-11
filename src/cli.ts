@@ -99,8 +99,12 @@ function emitAsciiOrData(
 
 const entryOption = z
   .union([z.string(), z.array(z.string())])
+  .describe("Entrypoint symbol(s): functionName or ClassName.method");
+
+const fileOption = z
+  .union([z.string(), z.array(z.string())])
   .describe(
-    "Entrypoint(s): functionName, ClassName.method, or an indexed source file path (expands to that file's exports)",
+    "Entrypoint file(s): indexed source path; expands to that file's exports",
   );
 
 const maxDepthOption = z.coerce
@@ -142,12 +146,13 @@ export const cli = Cli.create("calldiff", {
     }),
     options: z.object({
       entry: entryOption.optional(),
+      file: fileOption.optional(),
       maxDepth: maxDepthOption,
       locs: locsOption,
       from: z.string().optional().describe('Left / "before" tree'),
       to: z.string().optional().describe('Right / "after" tree'),
     }),
-    alias: { entry: "e" },
+    alias: { entry: "e", file: "F" },
     examples: [
       { description: "HEAD vs working tree" },
       {
@@ -164,9 +169,9 @@ export const cli = Cli.create("calldiff", {
         options: { entry: "createAgentSession" },
       },
       {
-        description: "File path as entrypoint (all exports in that file)",
+        description: "File as entrypoint (all exports in that file)",
         args: { from: "main", to: "feature" },
-        options: { entry: "src/routes.ts" },
+        options: { file: "src/routes.ts" },
       },
     ],
     usage: [
@@ -181,12 +186,14 @@ export const cli = Cli.create("calldiff", {
     hint: "Semantics match git diff: no refs → HEAD vs worktree; one ref → that vs worktree; two refs → compare those trees.",
     run(c) {
       const entries = entriesFromOption(c.options.entry);
+      const files = entriesFromOption(c.options.file);
       let result: DiffResult;
       try {
         result = runDiff({
           from: c.options.from ?? c.args.from,
           to: c.options.to ?? c.args.to,
           entries,
+          files,
           paths: c.args.paths,
           maxDepth: c.options.maxDepth,
           locs: c.options.locs,
@@ -226,11 +233,12 @@ export const cli = Cli.create("calldiff", {
       paths: pathsArg,
     }),
     options: z.object({
-      entry: entryOption,
+      entry: entryOption.optional(),
+      file: fileOption.optional(),
       maxDepth: maxDepthOption,
       locs: locsOption,
     }),
-    alias: { entry: "e" },
+    alias: { entry: "e", file: "F" },
     examples: [
       {
         description: "Tree from working tree",
@@ -243,15 +251,16 @@ export const cli = Cli.create("calldiff", {
       },
       {
         description: "Tree for every export in a file",
-        options: { entry: "packages/api/src/routes.ts" },
+        options: { file: "packages/api/src/routes.ts" },
       },
     ],
     run(c) {
       const entries = entriesFromOption(c.options.entry) ?? [];
-      if (entries.length === 0) {
+      const files = entriesFromOption(c.options.file) ?? [];
+      if (entries.length === 0 && files.length === 0) {
         return c.error({
           code: "MISSING_ENTRY",
-          message: "calldiff tree requires --entry / -e",
+          message: "calldiff tree requires --entry / -e or --file / -F",
           exitCode: 2,
         });
       }
@@ -260,6 +269,7 @@ export const cli = Cli.create("calldiff", {
         const result = runTree({
           ref: c.args.ref,
           entries,
+          files,
           paths: c.args.paths,
           maxDepth: c.options.maxDepth,
           locs: c.options.locs,
@@ -285,14 +295,15 @@ export const cli = Cli.create("calldiff", {
       paths: pathsArg,
     }),
     options: z.object({
-      entry: entryOption,
+      entry: entryOption.optional(),
+      file: fileOption.optional(),
       to: z
         .string()
         .describe("Target symbol to reach (functionName or ClassName.method)"),
       maxDepth: maxDepthOption,
       locs: locsOption,
     }),
-    alias: { entry: "e" },
+    alias: { entry: "e", file: "F" },
     examples: [
       {
         description: "Paths in the working tree",
@@ -303,13 +314,18 @@ export const cli = Cli.create("calldiff", {
         args: { ref: "HEAD", paths: ["examples/checkout"] },
         options: { entry: "runCheckout", to: "sendEmail" },
       },
+      {
+        description: "Paths from every export in a file",
+        options: { file: "packages/api/src/flow.ts", to: "notify" },
+      },
     ],
     run(c) {
       const entries = entriesFromOption(c.options.entry) ?? [];
-      if (entries.length === 0) {
+      const files = entriesFromOption(c.options.file) ?? [];
+      if (entries.length === 0 && files.length === 0) {
         return c.error({
           code: "MISSING_ENTRY",
-          message: "calldiff reach requires --entry / -e",
+          message: "calldiff reach requires --entry / -e or --file / -F",
           exitCode: 2,
         });
       }
@@ -325,6 +341,7 @@ export const cli = Cli.create("calldiff", {
         const result = runReach({
           ref: c.args.ref,
           entries,
+          files,
           to: c.options.to,
           paths: c.args.paths,
           maxDepth: c.options.maxDepth,

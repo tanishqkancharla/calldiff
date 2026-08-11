@@ -1,13 +1,12 @@
 export { cli, normalizeArgv } from "./cli.js";
 export {
   buildCallTree,
-  classifyEntrypoint,
-  classifyEntrypointAcross,
   exportsInFile,
   matchEntrypointFiles,
   normalizeEntryPath,
   resolveAllEntries,
   resolveEntry,
+  resolveEntrypointFile,
   resolveFileEntrypoints,
 } from "./calltree.js";
 export { diffTrees, treeHasChanges } from "./diff.js";

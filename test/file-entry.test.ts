@@ -1,12 +1,12 @@
 import { describe, expect, test } from "vitest";
 import { outdent } from "outdent";
 import {
-  classifyEntrypoint,
   matchEntrypointFiles,
+  resolveEntrypointFile,
   resolveFileEntrypoints,
 } from "../src/calltree.js";
 import { buildIndex } from "../src/extract.js";
-import { inferEntries } from "../src/infer.js";
+import { resolveExplicitDiffEntries } from "../src/infer.js";
 import type { FunctionInfo } from "../src/types.js";
 import { workspace } from "./workspace.js";
 
@@ -28,40 +28,6 @@ function fn(
     end: 1,
   };
 }
-
-describe("entrypoint classification", () => {
-  test("classifies by indexed file lookup, not string shape", () => {
-    const index = buildIndex([
-      fn("boot", "src/boot.ts", ["run"], true),
-      fn("run", "src/boot.ts", [], false),
-    ]);
-
-    expect(classifyEntrypoint("src/boot.ts", index)).toEqual({
-      kind: "file",
-      file: "src/boot.ts",
-    });
-    expect(classifyEntrypoint("boot.ts", index)).toEqual({
-      kind: "file",
-      file: "src/boot.ts",
-    });
-    expect(classifyEntrypoint("boot", index)).toEqual({
-      kind: "symbol",
-      key: "boot",
-    });
-  });
-
-  test("path-shaped strings that are not indexed stay symbols / not-found", () => {
-    const index = buildIndex([fn("boot", "src/boot.ts", [], true)]);
-
-    expect(classifyEntrypoint("boot", index).kind).toBe("symbol");
-    expect(() => classifyEntrypoint("src/missing.ts", index)).toThrow(
-      /Entrypoint not found/,
-    );
-    expect(() => classifyEntrypoint("packages/api/src/routes.ts", index)).toThrow(
-      /Entrypoint not found/,
-    );
-  });
-});
 
 describe("file entrypoint matching", () => {
   test("prefers exact paths then unique suffixes", () => {
@@ -88,6 +54,12 @@ describe("file entrypoint matching", () => {
     ).toEqual(["packages/a/src/routes.ts", "packages/b/src/routes.ts"]);
   });
 
+  test("resolveEntrypointFile throws when missing", () => {
+    expect(() => resolveEntrypointFile("missing.ts", ["src/boot.ts"])).toThrow(
+      /Entrypoint file not found/,
+    );
+  });
+
   test("resolveFileEntrypoints returns exported defs only", () => {
     const index = buildIndex([
       fn("boot", "src/boot.ts", ["run"], true),
@@ -112,7 +84,7 @@ describe("file entrypoint matching", () => {
   });
 });
 
-describe("inferEntries with file paths", () => {
+describe("resolveExplicitDiffEntries with --file", () => {
   test("expands a file path to exported keys", () => {
     const before = buildIndex([
       fn("boot", "src/boot.ts", ["old"], true),
@@ -123,12 +95,16 @@ describe("inferEntries with file paths", () => {
       fn("helper", "src/boot.ts", [], false),
     ]);
 
-    expect(inferEntries(before, after, ["src/boot.ts"], 12)).toEqual(["boot"]);
+    expect(
+      resolveExplicitDiffEntries(before, after, [], ["src/boot.ts"]).map(
+        (e) => e.key,
+      ),
+    ).toEqual(["boot"]);
   });
 });
 
-describe("CLI file entrypoints", () => {
-  test("tree -e <file> expands exported symbols in that file", () => {
+describe("CLI --file entrypoints", () => {
+  test("tree --file expands exported symbols in that file", () => {
     const host = workspace({
       "/packages/api/src/boot.ts": src`
         export function boot() {
@@ -148,7 +124,7 @@ describe("CLI file entrypoints", () => {
       `,
     });
 
-    const result = host.run("calldiff tree -e packages/api/src/boot.ts");
+    const result = host.run("calldiff tree --file packages/api/src/boot.ts");
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("boot()");
     expect(result.stdout).toContain("run()");
@@ -157,7 +133,7 @@ describe("CLI file entrypoints", () => {
     expect(result.stdout).not.toContain("decoy()");
   });
 
-  test("tree -e pins to the file when the same name exists elsewhere", () => {
+  test("tree -F pins to the file when the same name exists elsewhere", () => {
     const host = workspace({
       "/packages/a/src/flow.ts": src`
         export function start() {
@@ -173,13 +149,32 @@ describe("CLI file entrypoints", () => {
       `,
     });
 
-    const result = host.run("calldiff tree -e packages/b/src/flow.ts");
+    const result = host.run("calldiff tree -F packages/b/src/flow.ts");
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("fromB()");
     expect(result.stdout).not.toContain("fromA()");
   });
 
-  test("reach -e <file> walks exports in that file only", () => {
+  test("tree -e stays symbol-only even for path-shaped strings", () => {
+    const host = workspace({
+      "/src/boot.ts": src`
+        export function boot() {
+          run();
+        }
+        function run() {}
+      `,
+    });
+
+    const asFile = host.run("calldiff tree -e src/boot.ts");
+    expect(asFile.code).not.toBe(0);
+    expect(`${asFile.stdout}\n${asFile.stderr}`).toMatch(/Entrypoint not found/);
+
+    const asSymbol = host.run("calldiff tree -e boot");
+    expect(asSymbol.code).toBe(0);
+    expect(asSymbol.stdout).toContain("boot()");
+  });
+
+  test("reach --file walks exports in that file only", () => {
     const host = workspace({
       "/packages/a/src/flow.ts": src`
         export function start() {
@@ -198,14 +193,14 @@ describe("CLI file entrypoints", () => {
     });
 
     const result = host.run(
-      "calldiff reach -e packages/a/src/flow.ts --to notify",
+      "calldiff reach --file packages/a/src/flow.ts --to notify",
     );
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("notify()");
     expect(result.stdout).not.toContain("other()");
   });
 
-  test("diff -e <file> diffs exports defined in that file", () => {
+  test("diff --file diffs exports defined in that file", () => {
     const host = workspace();
     const before = host.commit("before", {
       "/src/boot.ts": src`
@@ -224,7 +219,7 @@ describe("CLI file entrypoints", () => {
       `,
     });
 
-    const result = host.run(`calldiff diff ${before} HEAD -e src/boot.ts`);
+    const result = host.run(`calldiff diff ${before} HEAD --file src/boot.ts`);
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("boot()");
     expect(result.stdout).toContain("oldPath()");
@@ -243,7 +238,7 @@ describe("CLI file entrypoints", () => {
       `,
     });
 
-    const result = host.run("calldiff tree -e boot.ts");
+    const result = host.run("calldiff tree --file boot.ts");
     expect(result.code).not.toBe(0);
     expect(`${result.stdout}\n${result.stderr}`).toMatch(
       /Ambiguous entrypoint file/,
@@ -260,7 +255,7 @@ describe("CLI file entrypoints", () => {
       `,
     });
 
-    const result = host.run("calldiff tree -e src/internal.ts");
+    const result = host.run("calldiff tree --file src/internal.ts");
     expect(result.code).not.toBe(0);
     expect(`${result.stdout}\n${result.stderr}`).toMatch(
       /No exported entrypoints/,
