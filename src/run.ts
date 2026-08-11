@@ -119,14 +119,16 @@ function loadIndex(
   const index = buildIndex(functions);
 
   // Star re-exports may point outside the path filter; peek there for hints only.
-  const allFiles = listSnapshotFiles(cwd, snapshot, []);
-  const expanded = expandReexports(
-    cwd,
-    snapshot,
-    reexportRecords,
-    allFiles,
-    extractFunctions,
-  );
+  const needsStarExpand = reexportRecords.some((r) => r.name === "*");
+  const expanded = needsStarExpand
+    ? expandReexports(
+        cwd,
+        snapshot,
+        reexportRecords,
+        listSnapshotFiles(cwd, snapshot, []),
+        extractFunctions,
+      )
+    : reexportRecords;
   setIndexReexports(index, expanded);
   return index;
 }
