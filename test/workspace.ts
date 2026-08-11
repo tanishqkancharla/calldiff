@@ -40,8 +40,15 @@ export type WorkspaceHost = {
  * Create an isolated git workspace for end-to-end CLI tests.
  *
  * ```ts
+ * import { outdent } from "outdent";
+ *
  * const host = workspace({
- *   "/src/app.ts": `export function boot() { run(); }\nfunction run() {}`,
+ *   "/src/app.ts": outdent`
+ *     export function boot() {
+ *       run();
+ *     }
+ *     function run() {}
+ *   `,
  * });
  * const result = host.run("calldiff reach -e boot --to run");
  * expect(result.stdout).toContain("boot()");

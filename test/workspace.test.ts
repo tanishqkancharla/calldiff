@@ -1,48 +1,52 @@
+import { outdent } from "outdent";
 import { describe, expect, test } from "vitest";
 import { workspace } from "./workspace.js";
+
+/** Keep the trailing newline so expectations match CLI stdout. */
+const src = outdent({ trimTrailingNewline: false });
 
 describe("workspace fixture smoke", () => {
   test("calldiff reach finds paths in a temp repo", () => {
     const host = workspace({
-      "/src/checkout.ts": `
-export function runCheckout() {
-  Cart.validate();
-  const reserved = Inventory.reserve();
-  if (!reserved) {
-    notifyCustomer();
-    return;
-  }
-  PaymentGateway.charge();
-  notifyCustomer();
-}
+      "/src/checkout.ts": src`
+        export function runCheckout() {
+          Cart.validate();
+          const reserved = Inventory.reserve();
+          if (!reserved) {
+            notifyCustomer();
+            return;
+          }
+          PaymentGateway.charge();
+          notifyCustomer();
+        }
 
-class Cart {
-  static validate() {
-    assertNonEmpty();
-  }
-}
+        class Cart {
+          static validate() {
+            assertNonEmpty();
+          }
+        }
 
-class Inventory {
-  static reserve() {
-    lockSku();
-    return true;
-  }
-}
+        class Inventory {
+          static reserve() {
+            lockSku();
+            return true;
+          }
+        }
 
-class PaymentGateway {
-  static charge() {
-    capture();
-  }
-}
+        class PaymentGateway {
+          static charge() {
+            capture();
+          }
+        }
 
-function assertNonEmpty() {}
-function lockSku() {}
-function capture() {}
-function notifyCustomer() {
-  sendEmail();
-}
-function sendEmail() {}
-`,
+        function assertNonEmpty() {}
+        function lockSku() {}
+        function capture() {}
+        function notifyCustomer() {
+          sendEmail();
+        }
+        function sendEmail() {}
+      `,
     });
 
     const result = host.run(
@@ -50,64 +54,66 @@ function sendEmail() {}
     );
 
     expect(result.code).toBe(0);
-    expect(result.stdout).toEqual(
-      [
-        "calldiff reach working tree: runCheckout → sendEmail",
-        "",
-        "# path 1",
-        "runCheckout()",
-        "└─ if (!reserved)",
-        "   └─ notifyCustomer()",
-        "      └─ sendEmail()",
-        "",
-        "# path 2",
-        "runCheckout()",
-        "└─ notifyCustomer()",
-        "   └─ sendEmail()",
-        "",
-      ].join("\n"),
-    );
+    expect(result.stdout).toEqual(src`
+      calldiff reach working tree: runCheckout → sendEmail
+
+      # path 1
+      runCheckout()
+      └─ if (!reserved)
+         └─ notifyCustomer()
+            └─ sendEmail()
+
+      # path 2
+      runCheckout()
+      └─ notifyCustomer()
+         └─ sendEmail()
+    `);
   });
 
   test("calldiff tree prints a call tree for an entrypoint", () => {
     const host = workspace({
-      "/src/app.ts": `
-export function boot() {
-  init();
-  run();
-}
-function init() {}
-function run() {
-  work();
-}
-function work() {}
-`,
+      "/src/app.ts": src`
+        export function boot() {
+          init();
+          run();
+        }
+        function init() {}
+        function run() {
+          work();
+        }
+        function work() {}
+      `,
     });
 
     const result = host.run("calldiff tree --entry boot");
 
     expect(result.code).toBe(0);
-    expect(result.stdout).toEqual(
-      [
-        "calldiff tree working tree",
-        "",
-        "boot()",
-        "├─ init()",
-        "└─ run()",
-        "   └─ work()",
-        "",
-      ].join("\n"),
-    );
+    expect(result.stdout).toEqual(src`
+      calldiff tree working tree
+
+      boot()
+      ├─ init()
+      └─ run()
+         └─ work()
+    `);
   });
 
   test("calldiff diff compares two commits", () => {
     const host = workspace();
     host.write({
-      "/src/app.ts": "export function root() { beforeCall(); }\n",
+      "/src/app.ts": src`
+        export function root() {
+          beforeCall();
+        }
+      `,
     });
     const before = host.commit("before");
     host.write({
-      "/src/app.ts": "export function root() { afterCall(); }\n",
+      "/src/app.ts": src`
+        export function root() {
+          afterCall();
+        }
+      `,
     });
     const after = host.commit("after");
 
