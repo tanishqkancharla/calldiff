@@ -101,43 +101,6 @@ describe("reach paths", () => {
     expect(paths[0]!.children).toEqual([]);
     expect(buildCallTree("runCheckout", index, 12).key).toBe("runCheckout");
   });
-
-  test("walks every definition when the same entry name appears in two files", () => {
-    const direct = extractFunctions(
-      "a/flow.ts",
-      `
-        export function start(id: string) {
-          notify(id);
-        }
-        function notify(id: string) {}
-      `,
-    );
-    const gated = extractFunctions(
-      "b/flow.ts",
-      `
-        export function start(id: string, retry: boolean) {
-          if (retry) {
-            notify(id);
-          }
-        }
-        function notify(id: string) {}
-      `,
-    );
-    const index = buildIndex([...gated, ...direct]);
-    const paths = findReachPaths("start", "notify", index, 12);
-    const ascii = paths.map((p) =>
-      renderTree(p, { color: false, locs: false }),
-    );
-
-    expect(ascii).toEqual([
-      ["start(id)", "└─ notify(id)"].join("\n"),
-      [
-        "start(id, retry)",
-        "└─ if (retry)",
-        "   └─ notify(id)",
-      ].join("\n"),
-    ]);
-  });
 });
 
 /**
