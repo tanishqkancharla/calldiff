@@ -101,15 +101,50 @@ describe("reach paths", () => {
     expect(paths[0]!.children).toEqual([]);
     expect(buildCallTree("runCheckout", index, 12).key).toBe("runCheckout");
   });
+
+  test("walks every definition when the same entry name appears in two files", () => {
+    const direct = extractFunctions(
+      "a/flow.ts",
+      `
+        export function start(id: string) {
+          notify(id);
+        }
+        function notify(id: string) {}
+      `,
+    );
+    const gated = extractFunctions(
+      "b/flow.ts",
+      `
+        export function start(id: string, retry: boolean) {
+          if (retry) {
+            notify(id);
+          }
+        }
+        function notify(id: string) {}
+      `,
+    );
+    const index = buildIndex([...gated, ...direct]);
+    const paths = findReachPaths("start", "notify", index, 12);
+    const ascii = paths.map((p) =>
+      renderTree(p, { color: false, locs: false }),
+    );
+
+    expect(ascii).toEqual([
+      ["start(id)", "└─ notify(id)"].join("\n"),
+      [
+        "start(id, retry)",
+        "└─ if (retry)",
+        "   └─ notify(id)",
+      ].join("\n"),
+    ]);
+  });
 });
 
 /**
  * Multi-file entry resolution via the CLI.
  *
- * When several files export the same entry name, reach should report paths
- * from every definition (its contract is completeness). Today bare-name
- * indexing keeps only the first and the rest are dropped silently.
- * See https://github.com/tanishqkancharla/calldiff/issues/20
+ * When several files export the same entry name, reach reports paths from
+ * every definition (its contract is completeness). See #20.
  */
 describe("reach across duplicate entry names", () => {
   const direct = src`
@@ -139,8 +174,7 @@ describe("reach across duplicate entry names", () => {
     }
   `;
 
-  // Expected to fail until reach walks every matching entry definition.
-  test.fails("includes a path from each file that defines the entry", () => {
+  test("includes a path from each file that defines the entry", () => {
     const host = workspace({
       "/src/a/flow.ts": direct,
       "/src/b/flow.ts": gated,
@@ -161,7 +195,7 @@ describe("reach across duplicate entry names", () => {
     `);
   });
 
-  test.fails("does not change which paths are reported when files reorder", () => {
+  test("does not change which paths are reported when files reorder", () => {
     // `a/` sorts before `b/` → gated definition is indexed first.
     const gatedFirst = workspace({
       "/src/a/flow.ts": gated,

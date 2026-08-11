@@ -73,6 +73,12 @@ export function extractCached(
 
 export type FunctionIndex = Map<string, FunctionInfo>;
 
+/**
+ * Full extraction list for an index, including definitions shadowed by
+ * first-wins bare-key insertion in {@link buildIndex}.
+ */
+const indexDefinitions = new WeakMap<FunctionIndex, FunctionInfo[]>();
+
 export function flattenCallKeys(steps: CallStep[]): string[] {
   const keys: string[] = [];
   const walk = (list: CallStep[]) => {
@@ -89,6 +95,14 @@ export function flattenCallKeys(steps: CallStep[]): string[] {
   return keys;
 }
 
+/**
+ * Every function recorded when the index was built (including duplicates that
+ * lost the bare-key race). Indexes created as plain Maps fall back to values().
+ */
+export function allFunctions(index: FunctionIndex): FunctionInfo[] {
+  return indexDefinitions.get(index) ?? [...index.values()];
+}
+
 export function buildIndex(functions: FunctionInfo[]): FunctionIndex {
   const index: FunctionIndex = new Map();
   for (const fn of functions) {
@@ -103,5 +117,6 @@ export function buildIndex(functions: FunctionInfo[]): FunctionIndex {
       }
     }
   }
+  indexDefinitions.set(index, functions.slice());
   return index;
 }

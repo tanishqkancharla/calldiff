@@ -1,10 +1,15 @@
-import type { FunctionIndex } from "./extract.js";
+import { allFunctions, type FunctionIndex } from "./extract.js";
 import { pickLoc } from "./loc.js";
-import type { CallNode, CallStep } from "./types.js";
+import type { CallNode, CallStep, FunctionInfo } from "./types.js";
 
-function displayCallLabel(key: string, index: FunctionIndex): string {
-  const info = index.get(key);
+function displayCallLabel(
+  key: string,
+  index: FunctionIndex,
+  info?: FunctionInfo,
+): string {
   if (info) return info.label;
+  const fromIndex = index.get(key);
+  if (fromIndex) return fromIndex.label;
   return key.includes("(") ? key : `${key}()`;
 }
 
@@ -51,9 +56,11 @@ function expandCall(
   visiting: Set<string>,
   inlineChildren?: CallStep[],
   callSite?: { file?: string; line?: number; endLine?: number },
+  /** When set, expand this body even if another definition owns the bare key. */
+  infoOverride?: FunctionInfo,
 ): CallNode {
-  const label = displayCallLabel(key, index);
-  const info = index.get(key);
+  const info = infoOverride ?? index.get(key);
+  const label = displayCallLabel(key, index, info);
 
   // Root uses the definition start line; every other node uses the call-site in the parent.
   const loc =
@@ -113,6 +120,27 @@ export function buildCallTree(
   return expandCall(resolved, index, 0, maxDepth, new Set());
 }
 
+/**
+ * Expand a specific definition. Used by `reach` when several functions share a
+ * bare key and first-wins indexing would otherwise hide all but one body.
+ */
+export function buildCallTreeFromInfo(
+  info: FunctionInfo,
+  index: FunctionIndex,
+  maxDepth: number,
+): CallNode {
+  return expandCall(
+    info.key,
+    index,
+    0,
+    maxDepth,
+    new Set(),
+    undefined,
+    undefined,
+    info,
+  );
+}
+
 export function resolveEntry(
   entry: string,
   index: FunctionIndex,
@@ -137,4 +165,44 @@ export function resolveEntry(
   }
 
   return null;
+}
+
+function entryNameMatches(key: string, entry: string): boolean {
+  return (
+    key === entry ||
+    key.endsWith(`.${entry}`) ||
+    key === `new ${entry}`
+  );
+}
+
+function sortDefinitions(fns: FunctionInfo[]): FunctionInfo[] {
+  return [...fns].sort((a, b) => {
+    if (a.label !== b.label) return a.label < b.label ? -1 : 1;
+    if (a.file !== b.file) return a.file < b.file ? -1 : 1;
+    return (a.line ?? 0) - (b.line ?? 0);
+  });
+}
+
+/**
+ * Every definition that matches `entry` (including those shadowed in the
+ * bare-key map). Prefer exact bare-key hits; otherwise Class.method / `new X`.
+ * Order is stable by label, then file — independent of extract order.
+ */
+export function resolveAllEntries(
+  entry: string,
+  index: FunctionIndex,
+): FunctionInfo[] {
+  const stripped = entry.replace(/\(\)$/, "");
+  const all = allFunctions(index);
+
+  const exact = all.filter(
+    (fn) => fn.key === entry || fn.key === stripped,
+  );
+  if (exact.length > 0) return sortDefinitions(exact);
+
+  const matches = all.filter(
+    (fn) =>
+      entryNameMatches(fn.key, entry) || entryNameMatches(fn.key, stripped),
+  );
+  return sortDefinitions(matches);
 }
