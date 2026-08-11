@@ -1,6 +1,13 @@
 import type { FunctionIndex } from "./extract.js";
-import { flattenCallKeys } from "./extract.js";
-import { buildCallTree, resolveEntry } from "./calltree.js";
+import { allFunctions, flattenCallKeys } from "./extract.js";
+import {
+  buildCallTree,
+  buildCallTreeFromInfo,
+  isFileEntrypoint,
+  matchEntrypointFiles,
+  resolveEntry,
+  resolveFileEntrypoints,
+} from "./calltree.js";
 import { diffTrees, treeHasChanges } from "./diff.js";
 import type { DiffNode, FunctionInfo } from "./types.js";
 
@@ -73,9 +80,51 @@ function changedKeys(
     .sort((a, b) => a.localeCompare(b));
 }
 
+function fileExistsInIndex(entry: string, index: FunctionIndex): string[] {
+  return matchEntrypointFiles(
+    entry,
+    allFunctions(index).map((fn) => fn.file),
+  );
+}
+
+function assertFileEntrypoints(
+  entry: string,
+  before: FunctionIndex,
+  after: FunctionIndex,
+): FunctionInfo[] {
+  const fromBefore = resolveFileEntrypoints(entry, before);
+  const fromAfter = resolveFileEntrypoints(entry, after);
+  if (fromBefore.length > 0 || fromAfter.length > 0) {
+    const byKey = new Map<string, FunctionInfo>();
+    for (const info of [...fromBefore, ...fromAfter]) {
+      if (!byKey.has(info.key)) byKey.set(info.key, info);
+    }
+    return [...byKey.values()].sort((a, b) => {
+      if (a.label !== b.label) return a.label < b.label ? -1 : 1;
+      return a.key < b.key ? -1 : a.key > b.key ? 1 : 0;
+    });
+  }
+
+  const matched = [
+    ...new Set([
+      ...fileExistsInIndex(entry, before),
+      ...fileExistsInIndex(entry, after),
+    ]),
+  ].sort();
+  if (matched.length === 0) {
+    throw new Error(`Entrypoint file not found: ${entry}`);
+  }
+  if (matched.length > 1) {
+    throw new Error(
+      `Ambiguous entrypoint file: ${entry} matches ${matched.join(", ")}. Use a more specific path.`,
+    );
+  }
+  throw new Error(`No exported entrypoints in ${matched[0]}`);
+}
+
 /**
  * Infer entrypoints: exported functions whose expanded call trees differ,
- * plus any explicitly requested entries.
+ * plus any explicitly requested entries (symbols or source file paths).
  */
 export function inferEntries(
   before: FunctionIndex,
@@ -86,6 +135,12 @@ export function inferEntries(
   if (explicit.length > 0) {
     const entries: string[] = [];
     for (const entry of explicit) {
+      if (isFileEntrypoint(entry)) {
+        for (const info of assertFileEntrypoints(entry, before, after)) {
+          if (!entries.includes(info.key)) entries.push(info.key);
+        }
+        continue;
+      }
       const key = resolveEntry(entry, after) ?? resolveEntry(entry, before);
       if (!key) throw new Error(`Entrypoint not found: ${entry}`);
       if (!entries.includes(key)) entries.push(key);
@@ -105,6 +160,72 @@ export function inferEntries(
   const checked = new Set(exported);
   const fallback = affected.filter((key) => !checked.has(key));
   return changedKeys(fallback, before, after, maxDepth);
+}
+
+/**
+ * Expand explicit `-e` values into concrete definitions for diffing.
+ * File paths pin to exported symbols in that file (both snapshots).
+ */
+export function resolveExplicitDiffEntries(
+  before: FunctionIndex,
+  after: FunctionIndex,
+  explicit: string[],
+): Array<{
+  key: string;
+  beforeInfo?: FunctionInfo;
+  afterInfo?: FunctionInfo;
+  /** When set, trees are built from these file-pinned definitions. */
+  file?: string;
+}> {
+  const out: Array<{
+    key: string;
+    beforeInfo?: FunctionInfo;
+    afterInfo?: FunctionInfo;
+    file?: string;
+  }> = [];
+  const seen = new Set<string>();
+
+  for (const entry of explicit) {
+    if (isFileEntrypoint(entry)) {
+      const infos = assertFileEntrypoints(entry, before, after);
+      const file =
+        infos[0]?.file ??
+        fileExistsInIndex(entry, after)[0] ??
+        fileExistsInIndex(entry, before)[0];
+      if (!file) throw new Error(`Entrypoint file not found: ${entry}`);
+
+      const keys = [
+        ...new Set(
+          [
+            ...resolveFileEntrypoints(entry, before),
+            ...resolveFileEntrypoints(entry, after),
+          ].map((info) => info.key),
+        ),
+      ].sort((a, b) => a.localeCompare(b));
+
+      for (const key of keys) {
+        const id = `${file}\0${key}`;
+        if (seen.has(id)) continue;
+        seen.add(id);
+        const beforeInfo = allFunctions(before).find(
+          (fn) => fn.file === file && fn.key === key && fn.exported,
+        );
+        const afterInfo = allFunctions(after).find(
+          (fn) => fn.file === file && fn.key === key && fn.exported,
+        );
+        out.push({ key, beforeInfo, afterInfo, file });
+      }
+      continue;
+    }
+
+    const key = resolveEntry(entry, after) ?? resolveEntry(entry, before);
+    if (!key) throw new Error(`Entrypoint not found: ${entry}`);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ key });
+  }
+
+  return out;
 }
 
 export function diffEntry(
@@ -150,6 +271,55 @@ export function diffEntry(
   if (hasBefore && !hasAfter) {
     const diff = diffTrees(beforeTree, {
       key: beforeKey,
+      label: beforeTree.label,
+      children: [],
+    });
+    return { ...diff, status: "removed" };
+  }
+
+  const diff = diffTrees(beforeTree, afterTree);
+  if (!treeHasChanges(diff)) return null;
+  return diff;
+}
+
+/** Diff two file-pinned definitions (or missing on one side). */
+export function diffPinnedEntry(
+  key: string,
+  beforeInfo: FunctionInfo | undefined,
+  afterInfo: FunctionInfo | undefined,
+  before: FunctionIndex,
+  after: FunctionIndex,
+  maxDepth: number,
+): DiffNode | null {
+  if (!beforeInfo && !afterInfo) return null;
+
+  const beforeTree = beforeInfo
+    ? buildCallTreeFromInfo(beforeInfo, before, maxDepth)
+    : {
+        key,
+        label: afterInfo?.label ?? key,
+        children: [] as [],
+      };
+
+  const afterTree = afterInfo
+    ? buildCallTreeFromInfo(afterInfo, after, maxDepth)
+    : {
+        key,
+        label: beforeInfo?.label ?? key,
+        children: [] as [],
+      };
+
+  if (!beforeInfo && afterInfo) {
+    const diff = diffTrees(
+      { key, label: afterTree.label, children: [] },
+      afterTree,
+    );
+    return { ...diff, status: "added" };
+  }
+
+  if (beforeInfo && !afterInfo) {
+    const diff = diffTrees(beforeTree, {
+      key,
       label: beforeTree.label,
       children: [],
     });

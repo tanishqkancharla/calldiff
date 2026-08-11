@@ -1,6 +1,70 @@
+import { extname } from "node:path";
 import { allFunctions, type FunctionIndex } from "./extract.js";
+import { listSupportedExtensions } from "./languages/registry.js";
 import { pickLoc } from "./loc.js";
 import type { CallNode, CallStep, FunctionInfo } from "./types.js";
+
+/** Normalize user-facing paths for entry matching (`\` → `/`, strip `./`). */
+export function normalizeEntryPath(entry: string): string {
+  return entry.replace(/\\/g, "/").replace(/^\.\//, "");
+}
+
+/**
+ * True when `-e` should be treated as a source file path rather than a symbol.
+ * Path separators always count; a bare name counts only with a supported ext
+ * (e.g. `routes.ts`, not `ClassName.method`).
+ */
+export function isFileEntrypoint(entry: string): boolean {
+  const normalized = normalizeEntryPath(entry);
+  if (normalized.includes("/")) return true;
+  const ext = extname(normalized).toLowerCase();
+  if (!ext) return false;
+  return listSupportedExtensions().includes(ext);
+}
+
+/**
+ * Resolve which indexed source files match a file entrypoint.
+ * Exact path wins; otherwise a unique suffix match (`routes.ts` → `src/routes.ts`).
+ */
+export function matchEntrypointFiles(
+  entry: string,
+  files: Iterable<string>,
+): string[] {
+  const normalized = normalizeEntryPath(entry);
+  const unique = [...new Set(files)];
+  const exact = unique.filter((file) => file === normalized);
+  if (exact.length > 0) return exact.sort();
+  return unique
+    .filter(
+      (file) =>
+        file === normalized || file.endsWith(`/${normalized}`),
+    )
+    .sort();
+}
+
+/**
+ * Exported definitions in the file matched by `entry`.
+ * Throws when the path is ambiguous across multiple indexed files.
+ * Returns [] when nothing matches (caller decides not-found vs no-exports).
+ */
+export function resolveFileEntrypoints(
+  entry: string,
+  index: FunctionIndex,
+): FunctionInfo[] {
+  const all = allFunctions(index);
+  const matched = matchEntrypointFiles(
+    entry,
+    all.map((fn) => fn.file),
+  );
+  if (matched.length === 0) return [];
+  if (matched.length > 1) {
+    throw new Error(
+      `Ambiguous entrypoint file: ${entry} matches ${matched.join(", ")}. Use a more specific path.`,
+    );
+  }
+  const file = matched[0]!;
+  return sortDefinitions(all.filter((fn) => fn.file === file && fn.exported));
+}
 
 function displayCallLabel(
   key: string,

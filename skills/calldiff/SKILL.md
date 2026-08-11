@@ -21,7 +21,7 @@ Diff call stacks between two git trees
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--entry` | `unknown` |  |  |
+| `--entry` | `unknown` |  | Entrypoint(s): functionName, ClassName.method, or source file path |
 | `--maxDepth` | `number` | `12` | Max call-tree depth |
 | `--locs` | `boolean` | `false` | Show call-site source locations (file:line) |
 | `--from` | `string` |  | Left / "before" tree |
@@ -41,6 +41,9 @@ calldiff diff abc123 def456
 
 # Force entrypoints
 calldiff diff main feature --entry createAgentSession
+
+# File path expands to that file's exports
+calldiff diff main feature --entry src/routes.ts
 ```
 
 > Semantics match git diff: no refs → HEAD vs worktree; one ref → that vs worktree; two refs → compare those trees.
@@ -62,7 +65,7 @@ Find all call paths from an entrypoint to a target symbol
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--entry` | `unknown` |  | Entrypoint(s): functionName or ClassName.method |
+| `--entry` | `unknown` |  | Entrypoint(s): functionName, ClassName.method, or source file path |
 | `--to` | `string` |  | Target symbol to reach (functionName or ClassName.method) |
 | `--maxDepth` | `number` | `12` | Max call-tree depth |
 | `--locs` | `boolean` | `false` | Show call-site source locations (file:line) |
@@ -94,7 +97,7 @@ View a call tree (no diff) for one or more entrypoints
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--entry` | `unknown` |  | Entrypoint(s): functionName or ClassName.method |
+| `--entry` | `unknown` |  | Entrypoint(s): functionName, ClassName.method, or source file path |
 | `--maxDepth` | `number` | `12` | Max call-tree depth |
 | `--locs` | `boolean` | `false` | Show call-site source locations (file:line) |
 
@@ -106,4 +109,7 @@ calldiff tree --entry createAgentSession
 
 # Tree from a commit
 calldiff tree HEAD --entry PiService.createAgentSession
+
+# Every export in a file
+calldiff tree --entry packages/api/src/routes.ts
 ```

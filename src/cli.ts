@@ -99,7 +99,9 @@ function emitAsciiOrData(
 
 const entryOption = z
   .union([z.string(), z.array(z.string())])
-  .describe("Entrypoint(s): functionName or ClassName.method");
+  .describe(
+    "Entrypoint(s): functionName, ClassName.method, or a source file path (expands to that file's exports)",
+  );
 
 const maxDepthOption = z.coerce
   .number()
@@ -160,6 +162,11 @@ export const cli = Cli.create("calldiff", {
         description: "Force entrypoints",
         args: { from: "main", to: "feature" },
         options: { entry: "createAgentSession" },
+      },
+      {
+        description: "File path as entrypoint (all exports in that file)",
+        args: { from: "main", to: "feature" },
+        options: { entry: "src/routes.ts" },
       },
     ],
     usage: [
@@ -233,6 +240,10 @@ export const cli = Cli.create("calldiff", {
         description: "Tree from a commit",
         args: { ref: "HEAD" },
         options: { entry: "PiService.createAgentSession" },
+      },
+      {
+        description: "Tree for every export in a file",
+        options: { entry: "packages/api/src/routes.ts" },
       },
     ],
     run(c) {

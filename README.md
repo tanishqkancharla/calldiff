@@ -42,9 +42,11 @@ calldiff diff main
 calldiff diff abc123 def456
 calldiff diff --from main --to feature
 
-# force entrypoints (functionName or ClassName.method)
+# force entrypoints (functionName, ClassName.method, or a source file path)
 calldiff diff main feature --entry createAgentSession
 calldiff diff main feature -e PiService.createAgentSession -e boot
+calldiff tree -e src/routes.ts
+calldiff tree -e packages/api/src/boot.ts
 
 # limit to paths (trailing positionals; leading -- also accepted)
 calldiff diff main feature src/lib
@@ -78,6 +80,8 @@ calldiff mcp add      # register as MCP server
 `+` lines are new in **to**.
 
 If you omit `--entry`, calldiff infers exported functions whose expanded call trees changed (and may show several).
+
+A source file path as `--entry` / `-e` expands to every **exported** symbol defined in that file (useful in monorepos). Bare names with a supported extension count (`routes.ts`); so do paths with separators (`packages/api/src/routes.ts`). Ambiguous suffix matches error so you can pass a more specific path.
 
 ### `tree`
 
