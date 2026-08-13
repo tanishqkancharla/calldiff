@@ -94,6 +94,14 @@ function collectStatements(
     steps.push({ type: "call", key, ...locFromNode(file, node) });
   };
 
+  /** Branch tests are walked for calls too — see CONTRACT.md "Must support" #4. */
+  const addTestCalls = (test: SyntaxNode | null) => {
+    if (!test) return;
+    for (const step of collectStatements(file, [test], className)) {
+      steps.push(step);
+    }
+  };
+
   const walk = (node: SyntaxNode): void => {
     if (
       node.type === "method_declaration" ||
@@ -126,6 +134,9 @@ function collectStatements(
           : cond;
       const condText = condInner ? collapseWs(condInner.text) : "";
 
+      // The nested `else if` chain below re-collects through collectStatements,
+      // so its own test calls come back with it — only this test needs walking.
+      addTestCalls(condInner);
       steps.push({
         type: "branch",
         key: condText ? `if:${condText}` : "if",

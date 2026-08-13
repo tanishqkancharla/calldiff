@@ -105,6 +105,13 @@ function collectStatements(
     const kind = asElseIf ? "else-if" : "if";
     const labelKind = asElseIf ? "else if" : "if";
 
+    // See CONTRACT.md "Must support" #4.
+    if (condInner) {
+      for (const step of collectStatements(file, [condInner], typeName)) {
+        steps.push(step);
+      }
+    }
+
     steps.push({
       type: "branch",
       key: condText ? `${kind}:${condText}` : kind,

@@ -80,6 +80,14 @@ function collectStatements(
     steps.push({ type: "call", key, ...locFromNode(file, node) });
   };
 
+  /** Branch tests are walked for calls too — see CONTRACT.md "Must support" #4. */
+  const addTestCalls = (test: SyntaxNode | null) => {
+    if (!test) return;
+    for (const step of collectStatements(file, [test], typeName)) {
+      steps.push(step);
+    }
+  };
+
   const walk = (node: SyntaxNode): void => {
     if (
       node.type === "function_declaration" ||
@@ -99,6 +107,7 @@ function collectStatements(
             c.type !== "elseif_statement",
         ) ?? null;
       const condText = cond ? collapseWs(cond.text) : "";
+      addTestCalls(cond);
       steps.push({
         type: "branch",
         key: condText ? `if:${condText}` : "if",
@@ -112,6 +121,7 @@ function collectStatements(
           const elseifCond =
             namedChildren(clause).find((c) => c.type !== "block") ?? null;
           const text = elseifCond ? collapseWs(elseifCond.text) : "";
+          addTestCalls(elseifCond);
           steps.push({
             type: "branch",
             key: text ? `else-if:${text}` : "else-if",

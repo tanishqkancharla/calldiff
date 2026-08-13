@@ -150,6 +150,20 @@ function collectStatements(
     steps.push({ type: "call", key, ...locFromNode(file, node) });
   };
 
+  /**
+   * A branch test is consumed as the branch label; walk it for calls as well,
+   * or `tree` prints `if (guard(x))` while `reach` finds no path to `guard`.
+   * Emitted before the branch because the test runs before the arm — the shape
+   * `while (guard(x))` already has, loops taking the ordinary path.
+   * See CONTRACT.md "Must support" #4.
+   */
+  const addTestCalls = (test: SyntaxNode | null) => {
+    if (!test) return;
+    for (const step of collectStatements(file, [test], className)) {
+      steps.push(step);
+    }
+  };
+
   const walkExpr = (node: SyntaxNode): void => {
     const type = node.type;
 
@@ -171,6 +185,7 @@ function collectStatements(
       const elseClause = childByType(node, "else_clause");
       const cond = test ? condText(test) : "";
 
+      addTestCalls(test);
       steps.push({
         type: "branch",
         key: branchKey("if", cond),
@@ -197,6 +212,7 @@ function collectStatements(
                 c.type !== "else_clause",
             ) ?? null;
           const elseCond = elseTest ? condText(elseTest) : "";
+          addTestCalls(elseTest);
           steps.push({
             type: "branch",
             key: branchKey("else-if", elseCond),

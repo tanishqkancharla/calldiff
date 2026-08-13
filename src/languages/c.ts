@@ -109,6 +109,12 @@ function collectStatements(file: string, statements: SyntaxNode[]): CallStep[] {
     steps.push({ type: "call", key, ...locFromNode(file, node) });
   };
 
+  /** Branch tests are walked for calls too — see CONTRACT.md "Must support" #4. */
+  const addTestCalls = (test: SyntaxNode | null) => {
+    if (!test) return;
+    for (const step of collectStatements(file, [test])) steps.push(step);
+  };
+
   const walk = (node: SyntaxNode): void => {
     // Nested function definitions (GCC extension) — skip bodies
     if (node.type === "function_definition") return;
@@ -124,6 +130,7 @@ function collectStatements(file: string, statements: SyntaxNode[]): CallStep[] {
         ) ??
         null;
       const text = condText(cond);
+      addTestCalls(cond);
       steps.push({
         type: "branch",
         key: text ? `if:${text}` : "if",
@@ -149,6 +156,7 @@ function collectStatements(file: string, statements: SyntaxNode[]): CallStep[] {
                 c.type !== "else_clause",
             ) ??
             null;
+          addTestCalls(elifCond);
           steps.push({
             type: "branch",
             key: elifText ? `else-if:${elifText}` : "else-if",

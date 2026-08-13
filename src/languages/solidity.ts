@@ -123,6 +123,13 @@ function collectStatements(
       const condText = cond ? collapseWs(cond.text) : "";
       const thenNode = bodies[0] ? unwrapStatement(bodies[0]) : null;
       const elseNode = bodies[1] ? unwrapStatement(bodies[1]) : null;
+      // See CONTRACT.md "Must support" #4. The nested `else if` chain below
+      // re-collects through collectStatements, so its test calls come with it.
+      if (cond) {
+        for (const step of collectStatements(file, [cond], contractName)) {
+          steps.push(step);
+        }
+      }
       steps.push({
         type: "branch",
         key: condText ? `if:${condText}` : "if",
