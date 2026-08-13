@@ -184,6 +184,14 @@ function collectStatements(
     }
 
     if (node.type === "switch_expression") {
+      // The subject runs before any arm. See CONTRACT.md "Must support" #4.
+      const subject =
+        namedChildren(node).find((c) => c.type !== "switch_case") ?? null;
+      if (subject) {
+        for (const step of collectStatements(file, [subject], typeName)) {
+          steps.push(step);
+        }
+      }
       for (const clause of namedChildren(node)) {
         if (clause.type !== "switch_case") continue;
         const kids = namedChildren(clause);

@@ -187,6 +187,9 @@ function collectStatements(
       const subject =
         namedChildren(node).find((c) => c.type !== "block") ?? null;
       const subjectText = subject ? collapseWs(subject.text) : "";
+      // The subject runs before any arm — `match get_kind(x):` calls
+      // `get_kind`. See CONTRACT.md "Must support" #4.
+      addTestCalls(subject);
       const block = childByType(node, "block");
       for (const clause of block ? namedChildren(block) : []) {
         if (clause.type !== "case_clause") continue;

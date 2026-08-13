@@ -180,6 +180,11 @@ function collectStatements(file: string, statements: SyntaxNode[]): CallStep[] {
     }
 
     if (node.type === "switch_statement") {
+      // The subject runs before any arm. See CONTRACT.md "Must support" #4.
+      addTestCalls(
+        node.childForFieldName("condition") ??
+          childByType(node, "parenthesized_expression"),
+      );
       const body =
         node.childForFieldName("body") ??
         childByType(node, "compound_statement");

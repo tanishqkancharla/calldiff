@@ -26,6 +26,8 @@ Helpers: `namedChildren`, `childByType`, `collapseWs` from `./types.js`.
    its branch: `if (guard(x))` really calls `guard`, and a label is not an edge.
    Skipping this makes `tree` print a call that `reach` reports no path to.
    Loops (`while (guard(x))`) already get this by taking the ordinary path.
+   Same for a switch/match subject — `switch (getKind(x))` calls `getKind`
+   before any arm is chosen, so walk it once, before the case branches.
 5. Nested function/lambda bodies NOT attributed to outer caller
 6. Ignore computed/dynamic callees when obvious
 

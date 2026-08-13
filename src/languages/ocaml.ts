@@ -143,6 +143,16 @@ function collectExpr(
           children: tryBody ? collectExpr(file, tryBody, moduleName) : [],
         });
       }
+      if (n.type === "match_expression") {
+        // The scrutinee runs before any arm. See CONTRACT.md "Must support" #4.
+        const subject =
+          namedChildren(n).find((c) => c.type !== "match_case") ?? null;
+        if (subject) {
+          for (const step of collectExpr(file, subject, moduleName)) {
+            steps.push(step);
+          }
+        }
+      }
       for (const clause of namedChildren(n)) {
         if (clause.type !== "match_case") continue;
         const kids = namedChildren(clause);

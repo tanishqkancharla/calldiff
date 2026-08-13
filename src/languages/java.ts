@@ -237,6 +237,8 @@ function collectStatements(
       node.type === "switch_expression" ||
       node.type === "switch_statement"
     ) {
+      // The subject runs before any arm. See CONTRACT.md "Must support" #4.
+      addTestCalls(childByType(node, "parenthesized_expression"));
       const body =
         childByType(node, "switch_block") ??
         childByType(node, "switch_body") ??

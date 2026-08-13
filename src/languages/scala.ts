@@ -215,6 +215,14 @@ function collectStatements(
     }
 
     if (node.type === "match_expression") {
+      // The scrutinee runs before any arm. See CONTRACT.md "Must support" #4.
+      const subject =
+        namedChildren(node).find((c) => c.type !== "case_block") ?? null;
+      if (subject) {
+        for (const step of collectStatements(file, [subject], typeName)) {
+          steps.push(step);
+        }
+      }
       const caseBlock = childByType(node, "case_block");
       for (const clause of caseBlock ? namedChildren(caseBlock) : []) {
         if (clause.type !== "case_clause") continue;

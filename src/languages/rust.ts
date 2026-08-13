@@ -172,6 +172,14 @@ function collectStatements(
     }
 
     if (node.type === "match_expression") {
+      // The scrutinee runs before any arm. See CONTRACT.md "Must support" #4.
+      const subject =
+        namedChildren(node).find((c) => c.type !== "match_block") ?? null;
+      if (subject) {
+        for (const step of collectStatements(file, [subject], typeName)) {
+          steps.push(step);
+        }
+      }
       const block = childByType(node, "match_block");
       for (const arm of block ? namedChildren(block) : []) {
         if (arm.type !== "match_arm") continue;

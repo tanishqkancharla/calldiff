@@ -282,6 +282,9 @@ function collectStatements(
     }
 
     if (type === "switch_statement") {
+      // The subject runs before any arm — `switch (getKind(x))` calls
+      // `getKind`. See CONTRACT.md "Must support" #4.
+      addTestCalls(childByType(node, "parenthesized_expression"));
       const body = childByType(node, "switch_body");
       for (const clause of body ? namedChildren(body) : []) {
         if (clause.type === "switch_case") {

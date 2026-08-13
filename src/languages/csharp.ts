@@ -223,6 +223,12 @@ function collectStatements(
     }
 
     if (node.type === "switch_statement") {
+      // The subject runs before any arm. See CONTRACT.md "Must support" #4.
+      addTestCalls(
+        node.childForFieldName("value") ??
+          namedChildren(node).find((c) => c.type !== "switch_body") ??
+          null,
+      );
       const body =
         node.childForFieldName("body") ?? childByType(node, "switch_body");
       if (body) {

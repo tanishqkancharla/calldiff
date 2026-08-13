@@ -233,6 +233,13 @@ function collectStatements(
     }
 
     if (node.type === "when_expression") {
+      // The subject runs before any arm. See CONTRACT.md "Must support" #4.
+      const subject = childByType(node, "when_subject");
+      if (subject) {
+        for (const step of collectStatements(file, [subject], className)) {
+          steps.push(step);
+        }
+      }
       for (const entry of namedChildren(node)) {
         if (entry.type !== "when_entry") continue;
         const cond = childByType(entry, "when_condition");

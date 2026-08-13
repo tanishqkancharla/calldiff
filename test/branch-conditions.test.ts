@@ -155,6 +155,82 @@ describe("branch test calls end to end", () => {
   });
 });
 
+/**
+ * A switch/match subject is the same defect one node over: it runs before any
+ * arm is chosen, and the extractors that special-case `switch` returned without
+ * walking it. TypeScript never special-cased `switch`, so its subject was
+ * always an ordinary edge — this makes the rest agree with it.
+ */
+describe("calls in a switch or match subject", () => {
+  const switched = buildIndex(
+    extractFunctions(
+      "sw.ts",
+      `
+        export function getKind(x: number): string { return "a"; }
+        export function target(): number { return 42; }
+        export function viaSwitch(x: number): number {
+          switch (getKind(x)) {
+            case "a": return target();
+            default: return 0;
+          }
+        }
+      `,
+    ),
+  );
+
+  test("typescript reaches the subject", () => {
+    expect(findReachPaths("viaSwitch", "getKind", switched, 12)).toHaveLength(1);
+  });
+
+  test("javascript reaches the subject", () => {
+    const js = buildIndex(
+      extractFunctions(
+        "sw.js",
+        `
+          export function getKind(x) { return "a"; }
+          export function target() { return 42; }
+          export function viaSwitch(x) {
+            switch (getKind(x)) {
+              case "a": return target();
+              default: return 0;
+            }
+          }
+        `,
+      ),
+    );
+    expect(findReachPaths("viaSwitch", "getKind", js, 12)).toHaveLength(1);
+    // The arms are still branches, not flattened into the subject's siblings.
+    const tree = buildCallTree("viaSwitch", js, 12);
+    expect(tree.children.map((c) => c.kind)).toEqual([
+      "call",
+      "branch",
+      "branch",
+    ]);
+  });
+
+  test("python reaches the match subject", () => {
+    const py = buildIndex(
+      extractFunctions(
+        "sw.py",
+        outdent`
+          def get_kind(x):
+              return "a"
+
+          def target():
+              return 42
+
+          def via_match(x):
+              match get_kind(x):
+                  case "a":
+                      return target()
+              return 0
+        `,
+      ),
+    );
+    expect(findReachPaths("via_match", "get_kind", py, 12)).toHaveLength(1);
+  });
+});
+
 /** Not a TypeScript quirk: every extractor consumed the test as label text. */
 describe("branch test calls in other languages", () => {
   test("python: elif and if tests both resolve", () => {

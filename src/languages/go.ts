@@ -176,6 +176,12 @@ function collectStatements(
             c.type !== "default_case",
         ) ?? null;
       const subjectText = subject ? collapseWs(subject.text) : "";
+      // The subject runs before any arm. See CONTRACT.md "Must support" #4.
+      if (subject) {
+        for (const step of collectStatements(file, [subject], receiverType)) {
+          steps.push(step);
+        }
+      }
       for (const clause of kids) {
         if (clause.type === "expression_case" || clause.type === "type_case") {
           const expr =

@@ -159,6 +159,10 @@ function collectStatements(file: string, statements: SyntaxNode[]): CallStep[] {
     }
 
     if (node.type === "case_statement") {
+      // The subject runs before any arm. See CONTRACT.md "Must support" #4.
+      addTestCalls(
+        namedChildren(node).find((c) => c.type !== "case_item") ?? null,
+      );
       for (const item of namedChildren(node)) {
         if (item.type !== "case_item") continue;
         const kids = namedChildren(item);
