@@ -119,6 +119,34 @@ const INSTALL_SPEC: Record<string, string> = {
 };
 
 /**
+ * npm argv for installing one grammar into the cache.
+ *
+ * The install must be *recorded* in the cache's package.json. npm reconciles
+ * the installed tree against that file every time, so under the previous
+ * `--no-save` — against a package.json that listed no dependencies — each
+ * grammar pruned the one installed before it ("added 1 package, and removed 1
+ * package"). The cache only ever held the most recently used language, so a
+ * polyglot repository re-downloaded and natively rebuilt a grammar on every
+ * run, and concurrent installs could delete a grammar another process was
+ * loading. Exact versions, so installing one grammar cannot drift another.
+ */
+export function grammarInstallArgs(
+  cacheDir: string,
+  installSpec: string,
+): string[] {
+  return [
+    "install",
+    "--prefix",
+    cacheDir,
+    "--save-exact",
+    "--no-fund",
+    "--no-audit",
+    "--legacy-peer-deps",
+    installSpec,
+  ];
+}
+
+/**
  * Install an npm grammar package into the shared cache if missing, then require it.
  * Reuses the cache across CLI invocations.
  */
@@ -164,23 +192,10 @@ export function loadGrammarPackage(
       // when the cache path is not writable, and its bare `mkdir` errno was
       // the least informative thing a caller could be handed.
       ensureCachePackageJson(cacheDir);
-      execFileSync(
-        "npm",
-        [
-          "install",
-          "--prefix",
-          cacheDir,
-          "--no-save",
-          "--no-fund",
-          "--no-audit",
-          "--legacy-peer-deps",
-          installSpec,
-        ],
-        {
-          stdio: ["ignore", "pipe", "pipe"],
-          env: process.env,
-        },
-      );
+      execFileSync("npm", grammarInstallArgs(cacheDir, installSpec), {
+        stdio: ["ignore", "pipe", "pipe"],
+        env: process.env,
+      });
     } catch (err) {
       // Without this the caller sees the raw errno — `mkdir '/nonexistent'` —
       // and has to guess which grammar was being fetched, or that one was.

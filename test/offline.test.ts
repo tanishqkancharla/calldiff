@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { outdent } from "outdent";
 import { afterEach, describe, expect, test } from "vitest";
 import {
+  grammarInstallArgs,
   grammarsOffline,
   setGrammarOffline,
 } from "../src/languages/grammars.js";
@@ -60,6 +61,25 @@ describe("grammarsOffline", () => {
     setGrammarOffline(false);
     setGrammarOffline(undefined);
     expect(grammarsOffline()).toBe(true);
+  });
+});
+
+/**
+ * The cache is only a cache if it accumulates. npm reconciles the tree against
+ * the cache's package.json on every install, so `--no-save` against a
+ * package.json listing nothing made each grammar prune the one before it.
+ */
+describe("grammarInstallArgs", () => {
+  test("records the install so npm cannot prune the other grammars", () => {
+    const args = grammarInstallArgs("/cache", "tree-sitter-python");
+    expect(args).toContain("--save-exact");
+    expect(args).not.toContain("--no-save");
+  });
+
+  test("installs into the given cache", () => {
+    const args = grammarInstallArgs("/cache", "tree-sitter-c-sharp@0.23.1");
+    expect(args.slice(0, 3)).toEqual(["install", "--prefix", "/cache"]);
+    expect(args.at(-1)).toBe("tree-sitter-c-sharp@0.23.1");
   });
 });
 
