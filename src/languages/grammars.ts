@@ -4,6 +4,8 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
@@ -118,6 +120,77 @@ const INSTALL_SPEC: Record<string, string> = {
     "@tree-sitter-grammars/tree-sitter-lua@0.2.0",
 };
 
+/** How long to wait for another process's install before giving up. */
+const LOCK_TIMEOUT_MS = 15 * 60_000;
+/** A lock older than this is assumed to be from a process that died. */
+const LOCK_STALE_MS = 15 * 60_000;
+const LOCK_POLL_MS = 250;
+
+/** Block this thread without spinning; installs are synchronous already. */
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function lockIsStale(lockPath: string, staleMs: number): boolean {
+  try {
+    return Date.now() - statSync(lockPath).mtimeMs > staleMs;
+  } catch {
+    // Vanished between the EEXIST and the stat: not stale, just gone.
+    return false;
+  }
+}
+
+/**
+ * Hold an exclusive lock on the grammar cache for the duration of `install`.
+ *
+ * npm is not safe to run concurrently against one `--prefix`: two processes
+ * writing the same `node_modules` collide with ENOTEMPTY, half-populated
+ * package directories, and `Cannot find module` for a package that is mid-copy.
+ * A consumer fanning calldiff out across a repository hits this, and so does
+ * this project's own test suite under vitest's file parallelism.
+ *
+ * `mkdir` is atomic and fails with EEXIST when the directory exists, which is
+ * the portable way to take a lock without a dependency. A lock left behind by
+ * a killed process is reclaimed once it goes stale, so a crash costs a wait,
+ * not a permanently wedged cache.
+ */
+export function withInstallLock(
+  cacheDir: string,
+  install: () => void,
+  options: { timeoutMs?: number; staleMs?: number; pollMs?: number } = {},
+): void {
+  const timeoutMs = options.timeoutMs ?? LOCK_TIMEOUT_MS;
+  const staleMs = options.staleMs ?? LOCK_STALE_MS;
+  const pollMs = options.pollMs ?? LOCK_POLL_MS;
+  const lockPath = join(cacheDir, ".install-lock");
+  const deadline = Date.now() + timeoutMs;
+
+  for (;;) {
+    try {
+      mkdirSync(lockPath);
+      break;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+      if (lockIsStale(lockPath, staleMs)) {
+        rmSync(lockPath, { recursive: true, force: true });
+        continue;
+      }
+      if (Date.now() >= deadline) {
+        throw new Error(
+          `timed out waiting for another calldiff process to finish installing grammars into ${cacheDir}. Remove ${lockPath} if no such process is running.`,
+        );
+      }
+      sleepSync(pollMs);
+    }
+  }
+
+  try {
+    install();
+  } finally {
+    rmSync(lockPath, { recursive: true, force: true });
+  }
+}
+
 /**
  * npm argv for installing one grammar into the cache.
  *
@@ -127,8 +200,7 @@ const INSTALL_SPEC: Record<string, string> = {
  * grammar pruned the one installed before it ("added 1 package, and removed 1
  * package"). The cache only ever held the most recently used language, so a
  * polyglot repository re-downloaded and natively rebuilt a grammar on every
- * run, and concurrent installs could delete a grammar another process was
- * loading. Exact versions, so installing one grammar cannot drift another.
+ * run. Exact versions, so installing one grammar cannot drift another.
  */
 export function grammarInstallArgs(
   cacheDir: string,
@@ -192,9 +264,14 @@ export function loadGrammarPackage(
       // when the cache path is not writable, and its bare `mkdir` errno was
       // the least informative thing a caller could be handed.
       ensureCachePackageJson(cacheDir);
-      execFileSync("npm", grammarInstallArgs(cacheDir, installSpec), {
-        stdio: ["ignore", "pipe", "pipe"],
-        env: process.env,
+      withInstallLock(cacheDir, () => {
+        // Re-check under the lock: whoever held it may have been installing
+        // this very grammar, in which case there is nothing left to do.
+        if (packageInstalled(cacheDir, npmPackage)) return;
+        execFileSync("npm", grammarInstallArgs(cacheDir, installSpec), {
+          stdio: ["ignore", "pipe", "pipe"],
+          env: process.env,
+        });
       });
     } catch (err) {
       // Without this the caller sees the raw errno — `mkdir '/nonexistent'` —

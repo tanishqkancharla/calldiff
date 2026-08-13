@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { outdent } from "outdent";
@@ -7,6 +7,7 @@ import {
   grammarInstallArgs,
   grammarsOffline,
   setGrammarOffline,
+  withInstallLock,
 } from "../src/languages/grammars.js";
 import { workspace } from "./workspace.js";
 
@@ -80,6 +81,71 @@ describe("grammarInstallArgs", () => {
     const args = grammarInstallArgs("/cache", "tree-sitter-c-sharp@0.23.1");
     expect(args.slice(0, 3)).toEqual(["install", "--prefix", "/cache"]);
     expect(args.at(-1)).toBe("tree-sitter-c-sharp@0.23.1");
+  });
+});
+
+/**
+ * npm is not safe to run concurrently against one `--prefix`. Two calldiff
+ * processes installing different grammars into a shared cache collided with
+ * ENOTEMPTY and half-copied package directories — which a consumer fanning
+ * calldiff out across a repository hits, and which this suite hit under
+ * vitest's file parallelism.
+ */
+describe("withInstallLock", () => {
+  function lockDir(): string {
+    const dir = mkdtempSync(join(tmpdir(), "calldiff-lock-"));
+    scratchDirs.push(dir);
+    return dir;
+  }
+
+  test("runs the install and releases the lock", () => {
+    const dir = lockDir();
+    let ran = 0;
+    withInstallLock(dir, () => {
+      ran += 1;
+      expect(existsSync(join(dir, ".install-lock"))).toBe(true);
+    });
+    expect(ran).toBe(1);
+    expect(existsSync(join(dir, ".install-lock"))).toBe(false);
+  });
+
+  test("releases the lock when the install throws", () => {
+    const dir = lockDir();
+    expect(() =>
+      withInstallLock(dir, () => {
+        throw new Error("install blew up");
+      }),
+    ).toThrow("install blew up");
+    expect(existsSync(join(dir, ".install-lock"))).toBe(false);
+  });
+
+  test("waits for a held lock and gives up with an actionable message", () => {
+    const dir = lockDir();
+    mkdirSync(join(dir, ".install-lock"));
+    let ran = false;
+
+    expect(() =>
+      withInstallLock(dir, () => { ran = true; }, {
+        timeoutMs: 50,
+        pollMs: 5,
+        staleMs: 60_000,
+      }),
+    ).toThrow(/timed out waiting for another calldiff process/);
+    expect(ran).toBe(false);
+  });
+
+  test("reclaims a lock left behind by a dead process", () => {
+    const dir = lockDir();
+    const lock = join(dir, ".install-lock");
+    mkdirSync(lock);
+    const longAgo = new Date(Date.now() - 60 * 60_000);
+    utimesSync(lock, longAgo, longAgo);
+
+    let ran = false;
+    withInstallLock(dir, () => { ran = true; }, { staleMs: 1000, pollMs: 5 });
+
+    expect(ran).toBe(true);
+    expect(existsSync(lock)).toBe(false);
   });
 });
 
