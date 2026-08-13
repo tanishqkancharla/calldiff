@@ -195,6 +195,18 @@ const locsOption = z
   .default(false)
   .describe("Show call-site source locations (file:line)");
 
+/**
+ * Optional rather than `.default(false)` on purpose: absent has to stay
+ * distinguishable from `--no-offline`, so that an unset flag falls through to
+ * `CALLDIFF_OFFLINE` instead of silently overriding it.
+ */
+const offlineOption = z
+  .boolean()
+  .optional()
+  .describe(
+    "Never install a tree-sitter grammar; skip files whose grammar is missing",
+  );
+
 const pathsArg = z
   .array(z.string())
   .optional()
@@ -227,6 +239,7 @@ export const cli = Cli.create("calldiff", {
       file: fileOption.optional(),
       maxDepth: maxDepthOption,
       locs: locsOption,
+      offline: offlineOption,
       from: z.string().optional().describe('Left / "before" tree'),
       to: z.string().optional().describe('Right / "after" tree'),
     }),
@@ -275,6 +288,7 @@ export const cli = Cli.create("calldiff", {
           paths: c.args.paths,
           maxDepth: c.options.maxDepth,
           locs: c.options.locs,
+          offline: c.options.offline,
           color: !c.formatExplicit && !c.agent,
         });
       } catch (error) {
@@ -315,6 +329,7 @@ export const cli = Cli.create("calldiff", {
       file: fileOption.optional(),
       maxDepth: maxDepthOption,
       locs: locsOption,
+      offline: offlineOption,
     }),
     alias: { entry: "e", file: "F" },
     examples: [
@@ -351,6 +366,7 @@ export const cli = Cli.create("calldiff", {
           paths: c.args.paths,
           maxDepth: c.options.maxDepth,
           locs: c.options.locs,
+          offline: c.options.offline,
           color: !c.formatExplicit && !c.agent,
         });
         return emitAsciiOrData(c, result);
@@ -380,6 +396,7 @@ export const cli = Cli.create("calldiff", {
         .describe("Target symbol to reach (functionName or ClassName.method)"),
       maxDepth: maxDepthOption,
       locs: locsOption,
+      offline: offlineOption,
     }),
     alias: { entry: "e", file: "F" },
     examples: [
@@ -424,6 +441,7 @@ export const cli = Cli.create("calldiff", {
           paths: c.args.paths,
           maxDepth: c.options.maxDepth,
           locs: c.options.locs,
+          offline: c.options.offline,
           color: !c.formatExplicit && !c.agent,
         });
         return emitAsciiOrData(c, result);

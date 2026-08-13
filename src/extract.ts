@@ -16,12 +16,16 @@ function grammarKey(npmPackage: string, grammarExport?: string): string {
   return grammarExport ? `${npmPackage}:${grammarExport}` : npmPackage;
 }
 
-function loadLanguage(npmPackage: string, grammarExport?: string): unknown {
+function loadLanguage(
+  npmPackage: string,
+  grammarExport?: string,
+  languageId?: string,
+): unknown {
   const key = grammarKey(npmPackage, grammarExport);
   const cached = languageCache.get(key);
   if (cached) return cached;
 
-  const mod = loadGrammarPackage(npmPackage);
+  const mod = loadGrammarPackage(npmPackage, languageId);
   const language = resolveLanguage(mod, grammarExport);
   languageCache.set(key, language);
   return language;
@@ -37,6 +41,7 @@ export function extractFunctions(
   const language = loadLanguage(
     extractor.grammarPackage,
     extractor.grammarExport,
+    extractor.id,
   );
   parser.setLanguage(language as any);
   const tree = parser.parse(source);

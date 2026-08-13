@@ -28,8 +28,13 @@ export type WorkspaceHost = {
    *
    * Accepts either a full command string (`"calldiff reach -e foo --to bar"`)
    * or argv without the binary (`"reach -e foo --to bar"` / `["reach", ...]`).
+   * `env` overrides variables for that one run, e.g. a scratch
+   * `CALLDIFF_GRAMMAR_CACHE`.
    */
-  run: (command: string | string[]) => RunResult;
+  run: (
+    command: string | string[],
+    options?: { env?: Record<string, string> },
+  ) => RunResult;
   /** Write (or overwrite) files relative to the workspace root. */
   write: (files: Record<string, string>) => void;
   /**
@@ -86,7 +91,7 @@ export function workspace(files: Record<string, string> = {}): WorkspaceHost {
       git(root, ["commit", "-qm", name]);
       return git(root, ["rev-parse", "HEAD"]).trim();
     },
-    run(command) {
+    run(command, options) {
       const args = normalizeArgv(command);
       const result = spawnSync(
         process.execPath,
@@ -98,6 +103,7 @@ export function workspace(files: Record<string, string> = {}): WorkspaceHost {
             ...process.env,
             // Keep grammar cache shared with the vitest env.
             FORCE_COLOR: "0",
+            ...options?.env,
           },
         },
       );

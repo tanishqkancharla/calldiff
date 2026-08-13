@@ -22,6 +22,7 @@ import {
   inferEntries,
   resolveExplicitDiffEntries,
 } from "./infer.js";
+import { setGrammarOffline } from "./languages/grammars.js";
 import { collectPathsTo, findReachPaths } from "./reach.js";
 import { renderDiff, renderTree } from "./render.js";
 import type { ExtractionCache, FunctionIndex } from "./extract.js";
@@ -50,6 +51,8 @@ export type DiffRunOptions = {
   color?: boolean;
   /** When true, append file:line suffixes in ascii. Default: false */
   locs?: boolean;
+  /** Decline the on-demand grammar install. Unset falls back to CALLDIFF_OFFLINE. */
+  offline?: boolean;
 };
 
 export type TreeRunOptions = {
@@ -61,6 +64,8 @@ export type TreeRunOptions = {
   maxDepth?: number;
   color?: boolean;
   locs?: boolean;
+  /** Decline the on-demand grammar install. Unset falls back to CALLDIFF_OFFLINE. */
+  offline?: boolean;
 };
 
 export type ReachRunOptions = {
@@ -76,6 +81,8 @@ export type ReachRunOptions = {
   maxDepth?: number;
   color?: boolean;
   locs?: boolean;
+  /** Decline the on-demand grammar install. Unset falls back to CALLDIFF_OFFLINE. */
+  offline?: boolean;
 };
 
 function loadIndex(
@@ -220,6 +227,7 @@ export function runDiff(options: DiffRunOptions = {}): DiffResult {
   const locs = options.locs === true;
   const hasExplicit = entriesOpt.length > 0 || filesOpt.length > 0;
 
+  setGrammarOffline(options.offline);
   assertGitRepo(cwd);
 
   const {
@@ -334,6 +342,7 @@ export function runTree(options: TreeRunOptions): TreeResult {
   const symbols = options.entries ?? [];
   const files = options.files ?? [];
 
+  setGrammarOffline(options.offline);
   assertGitRepo(cwd);
 
   const { snapshot, paths } = resolveSnapshotAndPaths(
@@ -379,6 +388,7 @@ export function runReach(options: ReachRunOptions): ReachResult {
   const symbols = options.entries ?? [];
   const files = options.files ?? [];
 
+  setGrammarOffline(options.offline);
   assertGitRepo(cwd);
 
   const { snapshot, paths } = resolveSnapshotAndPaths(

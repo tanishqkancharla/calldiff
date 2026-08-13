@@ -23,6 +23,27 @@ export function grammarCacheDir(): string {
   return join(homedir(), ".cache", "calldiff", "grammars");
 }
 
+/** Set by `--offline`; unset falls back to the environment. */
+let offlineOverride: boolean | undefined;
+
+/**
+ * Decline the on-demand install.
+ *
+ * `CALLDIFF_GRAMMAR_CACHE` could already move where grammars are written, but
+ * nothing could say "do not write them at all" — so a caller that promised its
+ * own users offline operation, determinism, or that it installs nothing had no
+ * way to adopt calldiff. Pass `undefined` to fall back to `CALLDIFF_OFFLINE`.
+ */
+export function setGrammarOffline(offline: boolean | undefined): void {
+  offlineOverride = offline;
+}
+
+export function grammarsOffline(): boolean {
+  if (offlineOverride !== undefined) return offlineOverride;
+  const value = process.env.CALLDIFF_OFFLINE;
+  return value === "1" || value === "true";
+}
+
 function packageInstalled(cacheDir: string, npmPackage: string): boolean {
   return existsSync(join(cacheDir, "node_modules", npmPackage));
 }
@@ -101,7 +122,11 @@ const INSTALL_SPEC: Record<string, string> = {
  * Install an npm grammar package into the shared cache if missing, then require it.
  * Reuses the cache across CLI invocations.
  */
-export function loadGrammarPackage(npmPackage: string): GrammarModule {
+export function loadGrammarPackage(
+  npmPackage: string,
+  /** Language id, for error messages: "no grammar for python" beats the package. */
+  languageId?: string,
+): GrammarModule {
   // Prefer the app's own dependency when present (e.g. tree-sitter-typescript).
   try {
     const localRequire = createRequire(import.meta.url);
@@ -126,26 +151,44 @@ export function loadGrammarPackage(npmPackage: string): GrammarModule {
   }
 
   const cacheDir = grammarCacheDir();
+  const name = languageId ?? npmPackage;
   if (!packageInstalled(cacheDir, npmPackage)) {
-    ensureCachePackageJson(cacheDir);
+    if (grammarsOffline()) {
+      throw new Error(
+        `no grammar for ${name} available offline: ${npmPackage} is not bundled and not in ${cacheDir}. Install it there, or drop --offline / CALLDIFF_OFFLINE to fetch it on demand.`,
+      );
+    }
     const installSpec = INSTALL_SPEC[npmPackage] ?? npmPackage;
-    execFileSync(
-      "npm",
-      [
-        "install",
-        "--prefix",
-        cacheDir,
-        "--no-save",
-        "--no-fund",
-        "--no-audit",
-        "--legacy-peer-deps",
-        installSpec,
-      ],
-      {
-        stdio: ["ignore", "pipe", "pipe"],
-        env: process.env,
-      },
-    );
+    try {
+      // Inside the try: creating the cache directory is the step that fails
+      // when the cache path is not writable, and its bare `mkdir` errno was
+      // the least informative thing a caller could be handed.
+      ensureCachePackageJson(cacheDir);
+      execFileSync(
+        "npm",
+        [
+          "install",
+          "--prefix",
+          cacheDir,
+          "--no-save",
+          "--no-fund",
+          "--no-audit",
+          "--legacy-peer-deps",
+          installSpec,
+        ],
+        {
+          stdio: ["ignore", "pipe", "pipe"],
+          env: process.env,
+        },
+      );
+    } catch (err) {
+      // Without this the caller sees the raw errno — `mkdir '/nonexistent'` —
+      // and has to guess which grammar was being fetched, or that one was.
+      const message = err instanceof Error ? err.message : String(err);
+      throw new Error(
+        `failed to install grammar for ${name} (${installSpec}) into ${cacheDir}: ${message}`,
+      );
+    }
   }
 
   const require = createRequire(join(cacheDir, "package.json"));
