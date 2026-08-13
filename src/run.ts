@@ -189,6 +189,10 @@ function serializeCallNode(node: CallNode): CallNode {
     ...(node.file ? { file: node.file } : {}),
     ...(node.line != null ? { line: node.line } : {}),
     ...(node.endLine != null ? { endLine: node.endLine } : {}),
+    ...(node.resolved != null ? { resolved: node.resolved } : {}),
+    ...(node.declaredIn ? { declaredIn: node.declaredIn } : {}),
+    ...(node.truncated ? { truncated: node.truncated } : {}),
+    ...(node.recursive ? { recursive: node.recursive } : {}),
     children: node.children.map(serializeCallNode),
   };
 }
