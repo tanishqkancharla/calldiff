@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   rmSync,
@@ -11,14 +12,35 @@ import { fileURLToPath } from "node:url";
 import { onTestFinished } from "vitest";
 
 const projectRoot = fileURLToPath(new URL("..", import.meta.url));
+const distCli = join(projectRoot, "dist/cli.js");
 const tsxCli = join(projectRoot, "node_modules/tsx/dist/cli.mjs");
-const calldiffCli = join(projectRoot, "src/cli.ts");
+const srcCli = join(projectRoot, "src/cli.ts");
+
+function cliArgv(): string[] {
+  if (existsSync(distCli)) return [distCli];
+  return [tsxCli, srcCli];
+}
 
 export type RunResult = {
   stdout: string;
   stderr: string;
   code: number;
 };
+
+/**
+ * ASCII payload of CLI stdout: drops the `calldiff …` header and incur CTA.
+ *
+ * Diffs attach a trailing `cta:` block (suggested `tree` commands). Language
+ * tests care about the tree, not that chrome.
+ */
+export function cliBody(stdout: string): string {
+  let text = stdout.replace(/\ncta:\n[\s\S]*$/, "");
+  text = text.replace(/\n+$/, "");
+  const lines = text.split("\n");
+  if (lines[0]?.startsWith("calldiff ")) lines.shift();
+  if (lines[0] === "") lines.shift();
+  return lines.join("\n");
+}
 
 export type WorkspaceHost = {
   /** Absolute path to the temp git repo. */
@@ -32,6 +54,8 @@ export type WorkspaceHost = {
   run: (command: string | string[]) => RunResult;
   /** Write (or overwrite) files relative to the workspace root. */
   write: (files: Record<string, string>) => void;
+  /** Delete a file relative to the workspace root. */
+  remove: (path: string) => void;
   /**
    * Stage and commit. Optional `files` are written first (same as `write`).
    * Returns the new HEAD sha.
@@ -74,30 +98,47 @@ export function workspace(files: Record<string, string> = {}): WorkspaceHost {
   git(root, ["init", "-q"]);
   git(root, ["config", "user.email", "test@example.com"]);
   git(root, ["config", "user.name", "Test"]);
+  // Isolate from the developer's global git (gpgsign, fsmonitor, hooks).
+  git(root, ["config", "commit.gpgsign", "false"]);
+  git(root, ["config", "tag.gpgsign", "false"]);
+  git(root, ["config", "core.fsmonitor", "false"]);
+  git(root, ["config", "core.untrackedCache", "false"]);
+  git(root, ["config", "core.hooksPath", "/dev/null"]);
 
   const host: WorkspaceHost = {
     root,
     write(next) {
       writeFiles(root, next);
     },
+    remove(path) {
+      const rel = normalizeWorkspacePath(path);
+      const abs = resolve(root, rel);
+      if (!abs.startsWith(root + sep) && abs !== root) {
+        throw new Error(`Refusing to remove outside workspace: ${path}`);
+      }
+      rmSync(abs, { force: true });
+    },
     commit(name, files) {
       if (files) writeFiles(root, files);
       git(root, ["add", "-A"]);
-      git(root, ["commit", "-qm", name]);
+      git(root, ["commit", "-qm", name, "--allow-empty"]);
       return git(root, ["rev-parse", "HEAD"]).trim();
     },
     run(command) {
       const args = normalizeArgv(command);
-      const result = spawnSync(
-        process.execPath,
-        [tsxCli, calldiffCli, ...args],
-        {
+      const result = spawnSync(process.execPath, [...cliArgv(), ...args], {
           cwd: root,
           encoding: "utf8",
+          timeout: 90_000,
+          killSignal: "SIGKILL",
+          stdio: ["ignore", "pipe", "pipe"],
           env: {
             ...process.env,
             // Keep grammar cache shared with the vitest env.
             FORCE_COLOR: "0",
+            GIT_TERMINAL_PROMPT: "0",
+            GIT_CONFIG_GLOBAL: "/dev/null",
+            GIT_CONFIG_NOSYSTEM: "1",
           },
         },
       );
@@ -135,10 +176,19 @@ function normalizeWorkspacePath(path: string): string {
 }
 
 function git(cwd: string, args: string[]): string {
-  const result = spawnSync("git", args, {
-    cwd,
-    encoding: "utf8",
-  });
+      const result = spawnSync("git", args, {
+        cwd,
+        encoding: "utf8",
+        timeout: 10_000,
+        stdio: ["ignore", "pipe", "pipe"],
+        env: {
+          ...process.env,
+          GIT_TERMINAL_PROMPT: "0",
+          GIT_OPTIONAL_LOCKS: "0",
+          GIT_CONFIG_GLOBAL: "/dev/null",
+          GIT_CONFIG_NOSYSTEM: "1",
+        },
+      });
   if (result.status !== 0) {
     throw new Error(
       `git ${args.join(" ")} failed: ${result.stderr || result.stdout}`,

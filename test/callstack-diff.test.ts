@@ -1,10 +1,11 @@
-import { test } from "./expectCallstack.js";
+import { expect, test } from "vitest";
+import { diffOutdent } from "./diff-outdent.js";
+import { sourcesFromFileDiff } from "./file-diff.js";
+import { cliBody, workspace } from "./workspace.js";
 
-test("refactors calls into a helper, preserves if/else branch labels", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("refactors calls into a helper, preserves if/else branch labels", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       export class PiService {
         static createAgentSession(options: { sessionId?: string }) {
     -     AuthStorage.create();
@@ -46,9 +47,17 @@ test("refactors calls into a helper, preserves if/else branch labels", ({
     + }
 
       function createCodingTools() {}
-    `,
-    "PiService.createAgentSession",
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/file.ts": before });
+  const to = host.commit("after", { "/file.ts": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e PiService.createAgentSession`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       PiService.createAgentSession(options)
     - ├─ AuthStorage.create()
     - ├─ new ModelRegistry()
@@ -63,12 +72,12 @@ test("refactors calls into a helper, preserves if/else branch labels", ({
          └─ SessionManager.create()
       └─ else
          └─ SessionManager.open(_id)
-  `);
+  `));
 });
 
-test("adds and removes free function calls", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("adds and removes free function calls", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       export function boot() {
         loadConfig();
     +   migrate();
@@ -78,21 +87,27 @@ test("adds and removes free function calls", ({ expectCallstack }) => {
       function loadConfig() {}
     + function migrate() {}
       function connect() {}
-    `,
-    "boot",
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/file.ts": before });
+  const to = host.commit("after", { "/file.ts": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e boot`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       boot()
       ├─ loadConfig()
     + ├─ migrate()
       └─ connect()
-  `);
+  `));
 });
 
-test("shows ClassName.method labels for this.method calls", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("shows ClassName.method labels for this.method calls", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       export class Runner {
         start() {
           this.prepare();
@@ -103,19 +118,27 @@ test("shows ClassName.method labels for this.method calls", ({
     +   validate() {}
         run() {}
       }
-    `,
-    "Runner.start",
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/file.ts": before });
+  const to = host.commit("after", { "/file.ts": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e Runner.start`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       Runner.start()
       ├─ Runner.prepare()
     + ├─ Runner.validate()
       └─ Runner.run()
-  `);
+  `));
 });
 
-test("labels else-if chains from source text", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("labels else-if chains from source text", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       export function handle(status: string) {
         if (status === "a") {
           doA();
@@ -131,9 +154,17 @@ test("labels else-if chains from source text", ({ expectCallstack }) => {
       function doB() {}
     + function doExtra() {}
       function doOther() {}
-    `,
-    "handle",
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/file.ts": before });
+  const to = host.commit("after", { "/file.ts": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e handle`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       handle(status)
       ├─ if (status === "a")
          └─ doA()
@@ -142,12 +173,12 @@ test("labels else-if chains from source text", ({ expectCallstack }) => {
     +    └─ doExtra()
       └─ else
          └─ doOther()
-  `);
+  `));
 });
 
-test("marks a fully removed callee subtree", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("marks a fully removed callee subtree", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       export function main() {
     -   setup();
         work();
@@ -159,35 +190,51 @@ test("marks a fully removed callee subtree", ({ expectCallstack }) => {
     -
     - function initDb() {}
       function work() {}
-    `,
-    "main",
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/file.ts": before });
+  const to = host.commit("after", { "/file.ts": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e main`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       main()
     - ├─ setup()
     - │  └─ initDb()
       └─ work()
-  `);
+  `));
 });
 
-test("resolves optional chaining as a normal call", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("resolves optional chaining as a normal call", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       export function boot(svc?: { start(): void }) {
         svc?.start();
     +   foo?.bar();
       }
-    `,
-    "boot",
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/file.ts": before });
+  const to = host.commit("after", { "/file.ts": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e boot`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       boot(svc)
       ├─ svc.start()
     + └─ foo.bar()
-  `);
+  `));
 });
 
-test("indexes and expands #private methods", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("indexes and expands #private methods", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       export class Vault {
         open() {
           this.#unlock();
@@ -199,19 +246,27 @@ test("indexes and expands #private methods", ({ expectCallstack }) => {
       }
       function prep() {}
     + function audit() {}
-    `,
-    "Vault.open",
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/file.ts": before });
+  const to = host.commit("after", { "/file.ts": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e Vault.open`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       Vault.open()
       └─ Vault.#unlock()
          ├─ prep()
     +    └─ audit()
-  `);
+  `));
 });
 
-test("follows class field arrow functions", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("follows class field arrow functions", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       export class Runner {
         start() {
           this.helper();
@@ -223,21 +278,27 @@ test("follows class field arrow functions", ({ expectCallstack }) => {
       }
       function work() {}
     + function extra() {}
-    `,
-    "Runner.start",
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/file.ts": before });
+  const to = host.commit("after", { "/file.ts": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e Runner.start`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       Runner.start()
       └─ Runner.helper()
          ├─ work()
     +    └─ extra()
-  `);
+  `));
 });
 
-test("does not attribute nested function bodies to the caller", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("does not attribute nested function bodies to the caller", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       export function outer() {
         function inner() {
           hidden();
@@ -252,18 +313,26 @@ test("does not attribute nested function bodies to the caller", ({
       function alsoHidden() {}
       function visible() {}
     + function alsoVisible() {}
-    `,
-    "outer",
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/file.ts": before });
+  const to = host.commit("after", { "/file.ts": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e outer`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       outer()
       ├─ visible()
     + └─ alsoVisible()
-  `);
+  `));
 });
 
-test("treats tagged templates as calls", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("treats tagged templates as calls", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       export function boot() {
         css\`color: red\`;
     +   html\`<div/>\`;
@@ -272,19 +341,27 @@ test("treats tagged templates as calls", ({ expectCallstack }) => {
       function css(_s: TemplateStringsArray) {}
     + function html(_s: TemplateStringsArray) {}
       function work() {}
-    `,
-    "boot",
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/file.ts": before });
+  const to = host.commit("after", { "/file.ts": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e boot`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       boot()
       ├─ css(_s)
     + ├─ html(_s)
       └─ work()
-  `);
+  `));
 });
 
-test("extracts methods on abstract classes", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("extracts methods on abstract classes", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       export abstract class Service {
         abstract prep(): void;
         start() {
@@ -293,18 +370,26 @@ test("extracts methods on abstract classes", ({ expectCallstack }) => {
         }
       }
     + function finish() {}
-    `,
-    "Service.start",
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/file.ts": before });
+  const to = host.commit("after", { "/file.ts": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e Service.start`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       Service.start()
       ├─ Service.prep()
     + └─ finish()
-  `);
+  `));
 });
 
-test("expands new Class() through the constructor", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("expands new Class() through the constructor", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       export function make() {
         new Thing();
       }
@@ -316,55 +401,79 @@ test("expands new Class() through the constructor", ({ expectCallstack }) => {
       }
       function init() {}
     + function ready() {}
-    `,
-    "make",
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/file.ts": before });
+  const to = host.commit("after", { "/file.ts": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e make`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       make()
       └─ new Thing()
          ├─ init()
     +    └─ ready()
-  `);
+  `));
 });
 
-test("follows const arrow function declarations", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("follows const arrow function declarations", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       export const boot = () => {
         load();
     +   migrate();
       };
       function load() {}
     + function migrate() {}
-    `,
-    "boot",
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/file.ts": before });
+  const to = host.commit("after", { "/file.ts": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e boot`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       boot()
       ├─ load()
     + └─ migrate()
-  `);
+  `));
 });
 
-test("names anonymous default exports as default", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("names anonymous default exports as default", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       export default function () {
         work();
     +   extra();
       }
       function work() {}
     + function extra() {}
-    `,
-    "default",
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/file.ts": before });
+  const to = host.commit("after", { "/file.ts": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e default`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       default()
       ├─ work()
     + └─ extra()
-  `);
+  `));
 });
 
-test("extracts generator function bodies", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("extracts generator function bodies", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       export function* gen() {
         yield work();
     +   yield extra();
@@ -373,19 +482,27 @@ test("extracts generator function bodies", ({ expectCallstack }) => {
       function work() { return 1; }
     + function extra() { return 2; }
       function done() {}
-    `,
-    "gen",
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/file.ts": before });
+  const to = host.commit("after", { "/file.ts": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e gen`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       gen()
       ├─ work()
     + ├─ extra()
       └─ done()
-  `);
+  `));
 });
 
-test("indexes getters and walks their bodies", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("indexes getters and walks their bodies", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       export class Config {
         get value() {
           load();
@@ -395,21 +512,27 @@ test("indexes getters and walks their bodies", ({ expectCallstack }) => {
       }
       function load() {}
     + function validate() {}
-    `,
-    "Config.value",
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/file.ts": before });
+  const to = host.commit("after", { "/file.ts": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e Config.value`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       Config.value()
       ├─ load()
     + └─ validate()
-  `);
+  `));
 });
 
-test("labels super.method as ClassName.method without linking base", ({
-  expectCallstack,
-}) => {
+test("labels super.method as ClassName.method without linking base", () => {
   // super.setup() is keyed as Child.setup (current class), so Base.setup is not expanded.
-  expectCallstack(
-    `
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       class Base {
         setup() {
           prep();
@@ -423,20 +546,26 @@ test("labels super.method as ClassName.method without linking base", ({
       }
       function prep() {}
     + function work() {}
-    `,
-    "Child.start",
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/file.ts": before });
+  const to = host.commit("after", { "/file.ts": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e Child.start`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       Child.start()
       ├─ Child.setup()
     + └─ work()
-  `);
+  `));
 });
 
-test("collects calls inside try/catch/finally and loops", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("collects calls inside try/catch/finally and loops", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       export function boot(items: string[]) {
         try {
           open();
@@ -458,9 +587,17 @@ test("collects calls inside try/catch/finally and loops", ({
       function visit(_item: string) {}
     + function pending() { return false; }
     + function flush() {}
-    `,
-    "boot",
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/file.ts": before });
+  const to = host.commit("after", { "/file.ts": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e boot`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       boot(items)
       ├─ open()
       ├─ recover()
@@ -468,29 +605,37 @@ test("collects calls inside try/catch/finally and loops", ({
       ├─ visit(_item)
     + ├─ pending()
     + └─ flush()
-  `);
+  `));
 });
 
-test("ignores computed member calls", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("ignores computed member calls", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       export function run(obj: Record<string, Function>, key: string) {
         obj[key]();
         obj.known();
     +   obj.other();
       }
-    `,
-    "run",
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/file.ts": before });
+  const to = host.commit("after", { "/file.ts": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e run`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       run(obj, key)
       ├─ obj.known()
     + └─ obj.other()
-  `);
+  `));
 });
 
-test("marks recursive cycles with a turnstile", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("marks recursive cycles with a turnstile", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       export function a() {
         b();
       }
@@ -499,20 +644,28 @@ test("marks recursive cycles with a turnstile", ({ expectCallstack }) => {
     +   c();
       }
     + function c() {}
-    `,
-    "a",
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/file.ts": before });
+  const to = host.commit("after", { "/file.ts": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e a`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       a()
       └─ b()
          ├─ a() ⇄
     +    └─ c()
-  `);
+  `));
 });
 
-test("truncates expansion at maxDepth", ({ expectCallstack }) => {
+test("truncates expansion at maxDepth", () => {
   // Deeper edits under c() are hidden once maxDepth stops expanding it.
-  expectCallstack(
-    `
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       export function a() {
         b();
     +   extra();
@@ -527,20 +680,27 @@ test("truncates expansion at maxDepth", ({ expectCallstack }) => {
       function d() {}
     + function e() {}
     + function extra() {}
-    `,
-    "a",
-    { maxDepth: 2 },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/file.ts": before });
+  const to = host.commit("after", { "/file.ts": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e a --max-depth 2`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       a()
       ├─ b()
       │  └─ c()
     + └─ extra()
-  `);
+  `));
 });
 
-test("LCS-aligns reordered sibling calls", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("LCS-aligns reordered sibling calls", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       export function boot() {
     -   first();
         second();
@@ -548,21 +708,27 @@ test("LCS-aligns reordered sibling calls", ({ expectCallstack }) => {
       }
       function first() {}
       function second() {}
-    `,
-    "boot",
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/file.ts": before });
+  const to = host.commit("after", { "/file.ts": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e boot`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       boot()
     - ├─ first()
       ├─ second()
     + └─ first()
-  `);
+  `));
 });
 
-test("shows a newly introduced callee subtree as added", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("shows a newly introduced callee subtree as added", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       export function main() {
     +   boot();
         work();
@@ -573,12 +739,20 @@ test("shows a newly introduced callee subtree as added", ({
     + }
     + function setup() {}
       function work() {}
-    `,
-    "main",
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/file.ts": before });
+  const to = host.commit("after", { "/file.ts": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e main`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       main()
     + ├─ boot()
     + │  └─ setup()
       └─ work()
-  `);
+  `));
 });

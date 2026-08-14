@@ -1,10 +1,11 @@
-import { test } from "./expectCallstack.js";
+import { expect, test } from "vitest";
+import { diffOutdent } from "./diff-outdent.js";
+import { sourcesFromFileDiff } from "./file-diff.js";
+import { cliBody, workspace } from "./workspace.js";
 
-test("java: refactors calls into a helper with if/else", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("java: refactors calls into a helper with if/else", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       class Pi {
         void createAgentSession(Options options) {
     -     AuthStorage.create();
@@ -34,10 +35,17 @@ test("java: refactors calls into a helper with if/else", ({
       }
       class Options { String sessionId; }
       class Services { void boot() {} }
-    `,
-    "Pi.createAgentSession",
-    { file: "Pi.java" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/Pi.java": before });
+  const to = host.commit("after", { "/Pi.java": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e Pi.createAgentSession`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       Pi.createAgentSession(options)
     - ├─ AuthStorage.create()
     - ├─ createCodingTools()
@@ -49,12 +57,12 @@ test("java: refactors calls into a helper with if/else", ({
          └─ SessionManager.create()
       └─ else
          └─ SessionManager.open(id)
-  `);
+  `));
 });
 
-test("java: this.method resolves to Class.method", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("java: this.method resolves to Class.method", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       class Runner {
         void start() {
           this.prepare();
@@ -65,22 +73,27 @@ test("java: this.method resolves to Class.method", ({ expectCallstack }) => {
     +   void validate() {}
         void run() {}
       }
-    `,
-    "Runner.start",
-    { file: "Runner.java" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/Runner.java": before });
+  const to = host.commit("after", { "/Runner.java": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e Runner.start`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       Runner.start()
       ├─ Runner.prepare()
     + ├─ Runner.validate()
       └─ Runner.run()
-  `);
+  `));
 });
 
-test("java: new Class() expands through constructor", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("java: new Class() expands through constructor", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       class Maker {
         void make() {
           new Thing();
@@ -94,20 +107,27 @@ test("java: new Class() expands through constructor", ({
         void init() {}
     +   void ready() {}
       }
-    `,
-    "Maker.make",
-    { file: "Ctor.java" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/Ctor.java": before });
+  const to = host.commit("after", { "/Ctor.java": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e Maker.make`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       Maker.make()
       └─ new Thing()
          ├─ Thing.init()
     +    └─ Thing.ready()
-  `);
+  `));
 });
 
-test("java: lambdas not attributed to outer caller", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("java: lambdas not attributed to outer caller", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       class Outer {
         void outer() {
           Runnable r = () -> { hidden(); };
@@ -118,19 +138,26 @@ test("java: lambdas not attributed to outer caller", ({ expectCallstack }) => {
         void visible() {}
     +   void alsoVisible() {}
       }
-    `,
-    "Outer.outer",
-    { file: "Nested.java" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/Nested.java": before });
+  const to = host.commit("after", { "/Nested.java": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e Outer.outer`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       Outer.outer()
       ├─ visible()
     + └─ alsoVisible()
-  `);
+  `));
 });
 
-test("java: else-if chains", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("java: else-if chains", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       class Handler {
         void handle(int status) {
           if (status == 1) {
@@ -147,10 +174,17 @@ test("java: else-if chains", ({ expectCallstack }) => {
     +   void doExtra() {}
         void doOther() {}
       }
-    `,
-    "Handler.handle",
-    { file: "Elif.java" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/Elif.java": before });
+  const to = host.commit("after", { "/Elif.java": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e Handler.handle`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       Handler.handle(status)
       ├─ if (status == 1)
          └─ doA()
@@ -159,14 +193,12 @@ test("java: else-if chains", ({ expectCallstack }) => {
     +    └─ doExtra()
       └─ else
          └─ doOther()
-  `);
+  `));
 });
 
-test("java: try/catch/finally and switch as branches", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("java: try/catch/finally and switch as branches", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       class Boot {
         void boot(int x) {
           try {
@@ -192,10 +224,17 @@ test("java: try/catch/finally and switch as branches", ({
         void doOther() {}
     +   void flush() {}
       }
-    `,
-    "Boot.boot",
-    { file: "Ctrl.java" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/Ctrl.java": before });
+  const to = host.commit("after", { "/Ctrl.java": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e Boot.boot`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       Boot.boot(x)
       ├─ try
          └─ open()
@@ -208,14 +247,12 @@ test("java: try/catch/finally and switch as branches", ({
       ├─ default
          └─ doOther()
     + └─ flush()
-  `);
+  `));
 });
 
-test("java: private methods still expand when called via this", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("java: private methods still expand when called via this", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       class Vault {
         void open() {
           this.unlock();
@@ -227,20 +264,27 @@ test("java: private methods still expand when called via this", ({
         void prep() {}
     +   void audit() {}
       }
-    `,
-    "Vault.open",
-    { file: "Private.java" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/Private.java": before });
+  const to = host.commit("after", { "/Private.java": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e Vault.open`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       Vault.open()
       └─ Vault.unlock()
          ├─ prep()
     +    └─ audit()
-  `);
+  `));
 });
 
-test("java: static Class.method calls expand", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("java: static Class.method calls expand", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       class App {
         void run() {
           Config.load();
@@ -257,14 +301,21 @@ test("java: static Class.method calls expand", ({ expectCallstack }) => {
         static void read() {}
     +   static void check() {}
       }
-    `,
-    "App.run",
-    { file: "Static.java" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/Static.java": before });
+  const to = host.commit("after", { "/Static.java": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e App.run`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       App.run()
       ├─ Config.load()
       │  └─ read()
     + └─ Config.validate()
     +    └─ check()
-  `);
+  `));
 });

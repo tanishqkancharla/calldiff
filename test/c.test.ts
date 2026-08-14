@@ -1,8 +1,11 @@
-import { test } from "./expectCallstack.js";
+import { expect, test } from "vitest";
+import { diffOutdent } from "./diff-outdent.js";
+import { sourcesFromFileDiff } from "./file-diff.js";
+import { cliBody, workspace } from "./workspace.js";
 
-test("c: refactors calls into a helper with if/else", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("c: refactors calls into a helper with if/else", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       int CreateAgentSession(int options) {
     -   AuthStorageCreate();
     -   CreateCodingTools();
@@ -27,10 +30,17 @@ test("c: refactors calls into a helper with if/else", ({ expectCallstack }) => {
       void CreateCodingTools(void) {}
       void SessionManagerCreate(void) {}
       void SessionManagerOpen(int id) {}
-    `,
-    "CreateAgentSession",
-    { file: "pi.c" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/pi.c": before });
+  const to = host.commit("after", { "/pi.c": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e CreateAgentSession`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       CreateAgentSession(options)
     - ├─ AuthStorageCreate()
     - ├─ CreateCodingTools()
@@ -42,14 +52,12 @@ test("c: refactors calls into a helper with if/else", ({ expectCallstack }) => {
          └─ SessionManagerCreate()
       └─ else
          └─ SessionManagerOpen(id)
-  `);
+  `));
 });
 
-test("c: field/arrow receiver calls resolve to obj.method", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("c: field/arrow receiver calls resolve to obj.method", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       void Runner_Start(struct Runner *r) {
         r->Prepare();
     +   r->Validate();
@@ -58,20 +66,27 @@ test("c: field/arrow receiver calls resolve to obj.method", ({
       void Prepare(struct Runner *r) {}
     + void Validate(struct Runner *r) {}
       void Run(struct Runner *r) {}
-    `,
-    "Runner_Start",
-    { file: "runner.c" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/runner.c": before });
+  const to = host.commit("after", { "/runner.c": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e Runner_Start`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       Runner_Start(r)
       ├─ r.Prepare()
     + ├─ r.Validate()
       └─ r.Run()
-  `);
+  `));
 });
 
-test("c: else-if chains", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("c: else-if chains", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       void handle(int status) {
         if (status == 1) {
           do_a();
@@ -86,10 +101,17 @@ test("c: else-if chains", ({ expectCallstack }) => {
       void do_b(void) {}
     + void do_extra(void) {}
       void do_other(void) {}
-    `,
-    "handle",
-    { file: "elif.c" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/elif.c": before });
+  const to = host.commit("after", { "/elif.c": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e handle`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       handle(status)
       ├─ if status == 1
          └─ do_a()
@@ -98,12 +120,12 @@ test("c: else-if chains", ({ expectCallstack }) => {
     +    └─ do_extra()
       └─ else
          └─ do_other()
-  `);
+  `));
 });
 
-test("c: switch cases as branches", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("c: switch cases as branches", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       void boot(int x) {
         switch (x) {
           case 1:
@@ -124,10 +146,17 @@ test("c: switch cases as branches", ({ expectCallstack }) => {
     + void do_extra(void) {}
       void do_other(void) {}
     + void flush(void) {}
-    `,
-    "boot",
-    { file: "switch.c" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/switch.c": before });
+  const to = host.commit("after", { "/switch.c": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e boot`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       boot(x)
       ├─ case 1
          └─ do_a()
@@ -137,14 +166,12 @@ test("c: switch cases as branches", ({ expectCallstack }) => {
       ├─ default
          └─ do_other()
     + └─ flush()
-  `);
+  `));
 });
 
-test("c: does not attribute nested function bodies to the caller", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("c: does not attribute nested function bodies to the caller", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       void outer(void) {
         void nested(void) {
           hidden();
@@ -155,19 +182,26 @@ test("c: does not attribute nested function bodies to the caller", ({
       void hidden(void) {}
       void visible(void) {}
     + void also_visible(void) {}
-    `,
-    "outer",
-    { file: "nested.c" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/nested.c": before });
+  const to = host.commit("after", { "/nested.c": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e outer`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       outer()
       ├─ visible()
     + └─ also_visible()
-  `);
+  `));
 });
 
-test("c: expands static helpers when called", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("c: expands static helpers when called", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       void boot(void) {
         helper();
     +   extra();
@@ -179,33 +213,47 @@ test("c: expands static helpers when called", ({ expectCallstack }) => {
       void load(void) {}
     + void migrate(void) {}
     + void extra(void) {}
-    `,
-    "boot",
-    { file: "static.c" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/static.c": before });
+  const to = host.commit("after", { "/static.c": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e boot`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       boot()
       ├─ helper()
       │  ├─ load()
     + │  └─ migrate()
     + └─ extra()
-  `);
+  `));
 });
 
-test("c: dot and arrow field calls", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("c: dot and arrow field calls", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       void run(struct Runner r, struct Runner *p) {
         r.Prepare();
         p->Run();
     +   p->Validate();
       }
-    `,
-    "run",
-    { file: "fields.c" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/fields.c": before });
+  const to = host.commit("after", { "/fields.c": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e run`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       run(r, p)
       ├─ r.Prepare()
       ├─ p.Run()
     + └─ p.Validate()
-  `);
+  `));
 });

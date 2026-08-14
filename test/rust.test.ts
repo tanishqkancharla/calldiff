@@ -1,10 +1,11 @@
-import { test } from "./expectCallstack.js";
+import { expect, test } from "vitest";
+import { diffOutdent } from "./diff-outdent.js";
+import { sourcesFromFileDiff } from "./file-diff.js";
+import { cliBody, workspace } from "./workspace.js";
 
-test("rust: refactors calls into a helper with if/else", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("rust: refactors calls into a helper with if/else", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       fn create_agent_session(options: Options) {
     -   auth_storage_create();
     -   create_coding_tools();
@@ -27,10 +28,17 @@ test("rust: refactors calls into a helper with if/else", ({
       fn create_coding_tools() {}
       fn session_manager_create() {}
       fn session_manager_open(_id: String) {}
-    `,
-    "create_agent_session",
-    { file: "pi.rs" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/pi.rs": before });
+  const to = host.commit("after", { "/pi.rs": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e create_agent_session`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       create_agent_session(options)
     - ├─ auth_storage_create()
     - ├─ create_coding_tools()
@@ -42,12 +50,12 @@ test("rust: refactors calls into a helper with if/else", ({
          └─ session_manager_create()
       └─ else
          └─ session_manager_open(_id)
-  `);
+  `));
 });
 
-test("rust: self.method resolves to Type.method", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("rust: self.method resolves to Type.method", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       struct Runner;
 
       impl Runner {
@@ -60,22 +68,27 @@ test("rust: self.method resolves to Type.method", ({ expectCallstack }) => {
     +     fn validate(&self) {}
           fn run(&self) {}
       }
-    `,
-    "Runner.start",
-    { file: "runner.rs" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/runner.rs": before });
+  const to = host.commit("after", { "/runner.rs": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e Runner.start`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       Runner.start(self)
       ├─ Runner.prepare(self)
     + ├─ Runner.validate(self)
       └─ Runner.run(self)
-  `);
+  `));
 });
 
-test("rust: Type::new expands through constructor body", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("rust: Type::new expands through constructor body", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       fn make() {
           Thing::new();
       }
@@ -92,20 +105,27 @@ test("rust: Type::new expands through constructor body", ({
 
       fn init() {}
     + fn ready() {}
-    `,
-    "make",
-    { file: "ctor.rs" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/ctor.rs": before });
+  const to = host.commit("after", { "/ctor.rs": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e make`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       make()
       └─ new Thing()
          ├─ init()
     +    └─ ready()
-  `);
+  `));
 });
 
-test("rust: closures not attributed to outer caller", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("rust: closures not attributed to outer caller", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       fn outer() {
           let f = || {
               hidden();
@@ -117,19 +137,26 @@ test("rust: closures not attributed to outer caller", ({ expectCallstack }) => {
       fn hidden() {}
       fn visible() {}
     + fn also_visible() {}
-    `,
-    "outer",
-    { file: "closures.rs" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/closures.rs": before });
+  const to = host.commit("after", { "/closures.rs": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e outer`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       outer()
       ├─ visible()
     + └─ also_visible()
-  `);
+  `));
 });
 
-test("rust: else if chains", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("rust: else if chains", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       fn handle(status: i32) {
           if status == 1 {
               do_a();
@@ -144,10 +171,17 @@ test("rust: else if chains", ({ expectCallstack }) => {
       fn do_b() {}
     + fn do_extra() {}
       fn do_other() {}
-    `,
-    "handle",
-    { file: "elif.rs" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/elif.rs": before });
+  const to = host.commit("after", { "/elif.rs": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e handle`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       handle(status)
       ├─ if status == 1
          └─ do_a()
@@ -156,12 +190,12 @@ test("rust: else if chains", ({ expectCallstack }) => {
     +    └─ do_extra()
       └─ else
          └─ do_other()
-  `);
+  `));
 });
 
-test("rust: match arms as branches", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("rust: match arms as branches", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       fn boot(x: i32) {
           match x {
               1 => do_a(),
@@ -172,24 +206,29 @@ test("rust: match arms as branches", ({ expectCallstack }) => {
       fn do_a() {}
       fn do_other() {}
     + fn flush() {}
-    `,
-    "boot",
-    { file: "match.rs" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/match.rs": before });
+  const to = host.commit("after", { "/match.rs": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e boot`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       boot(x)
       ├─ case 1
          └─ do_a()
       ├─ case _
          └─ do_other()
     + └─ flush()
-  `);
+  `));
 });
 
-test("rust: async fn bodies and pub visibility still expand", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("rust: async fn bodies and pub visibility still expand", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       pub async fn boot() {
           load().await;
     +     migrate().await;
@@ -198,22 +237,27 @@ test("rust: async fn bodies and pub visibility still expand", ({
       async fn load() {}
     + async fn migrate() {}
       fn _helper() {}
-    `,
-    "boot",
-    { file: "async.rs" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/async.rs": before });
+  const to = host.commit("after", { "/async.rs": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e boot`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       boot()
       ├─ load()
     + ├─ migrate()
       └─ _helper()
-  `);
+  `));
 });
 
-test("rust: Type::method scoped calls and ignores bare field reads", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("rust: Type::method scoped calls and ignores bare field reads", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       fn run() {
           Runner::start();
           obj.known();
@@ -229,15 +273,22 @@ test("rust: Type::method scoped calls and ignores bare field reads", ({
       }
       fn prep() {}
     + fn go() {}
-    `,
-    "run",
-    { file: "scoped.rs" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/scoped.rs": before });
+  const to = host.commit("after", { "/scoped.rs": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e run`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       run()
       ├─ Runner.start()
       │  ├─ prep()
     + │  └─ go()
       ├─ obj.known()
     + └─ obj.other()
-  `);
+  `));
 });

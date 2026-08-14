@@ -1,10 +1,11 @@
-import { test } from "./expectCallstack.js";
+import { expect, test } from "vitest";
+import { diffOutdent } from "./diff-outdent.js";
+import { sourcesFromFileDiff } from "./file-diff.js";
+import { cliBody, workspace } from "./workspace.js";
 
-test("bash: refactors calls into a helper with if/else", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("bash: refactors calls into a helper with if/else", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       create_agent_session() {
     -   auth_storage_create
     -   create_coding_tools
@@ -25,10 +26,17 @@ test("bash: refactors calls into a helper with if/else", ({
       create_coding_tools() { :; }
       session_manager_create() { :; }
       session_manager_open() { :; }
-    `,
-    "create_agent_session",
-    { file: "pi.sh" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/pi.sh": before });
+  const to = host.commit("after", { "/pi.sh": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e create_agent_session`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       create_agent_session()
     - ├─ auth_storage_create()
     - ├─ create_coding_tools()
@@ -39,12 +47,12 @@ test("bash: refactors calls into a helper with if/else", ({
          └─ session_manager_create()
       └─ else
          └─ session_manager_open()
-  `);
+  `));
 });
 
-test("bash: skips nested function bodies", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("bash: skips nested function bodies", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       nested_demo() {
         outer_call
         nested() {
@@ -58,20 +66,27 @@ test("bash: skips nested function bodies", ({ expectCallstack }) => {
       visible_call() { :; }
     + also_visible() { :; }
       hidden_call() { :; }
-    `,
-    "nested_demo",
-    { file: "nested.bash" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/nested.bash": before });
+  const to = host.commit("after", { "/nested.bash": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e nested_demo`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       nested_demo()
       ├─ outer_call()
       ├─ visible_call()
     + └─ also_visible()
-  `);
+  `));
 });
 
-test("bash: elif chains and case branches", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("bash: elif chains and case branches", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       boot() {
         if [ "$x" = a ]; then
           do_a
@@ -93,10 +108,17 @@ test("bash: elif chains and case branches", ({ expectCallstack }) => {
     + do_extra() { :; }
       do_c() { :; }
     + flush() { :; }
-    `,
-    "boot",
-    { file: "ctrl.sh" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/ctrl.sh": before });
+  const to = host.commit("after", { "/ctrl.sh": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e boot`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       boot()
       ├─ if [ "$x" = a ]
          └─ do_a()
@@ -110,14 +132,12 @@ test("bash: elif chains and case branches", ({ expectCallstack }) => {
       ├─ case *
          └─ do_c()
     + └─ flush()
-  `);
+  `));
 });
 
-test("bash: command substitution calls are followed", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("bash: command substitution calls are followed", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       boot() {
         result=$(sub_call)
         visible
@@ -127,20 +147,27 @@ test("bash: command substitution calls are followed", ({
       sub_call() { :; }
       visible() { :; }
     + also() { :; }
-    `,
-    "boot",
-    { file: "sub.sh" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/sub.sh": before });
+  const to = host.commit("after", { "/sub.sh": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e boot`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       boot()
       ├─ sub_call()
       ├─ visible()
     + └─ also()
-  `);
+  `));
 });
 
-test("bash: plain command calls with arguments", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("bash: plain command calls with arguments", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       deploy() {
         prepare_env "prod"
         restart_service app
@@ -150,22 +177,27 @@ test("bash: plain command calls with arguments", ({ expectCallstack }) => {
       prepare_env() { :; }
       restart_service() { :; }
     + notify_done() { :; }
-    `,
-    "deploy",
-    { file: "cmds.sh" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/cmds.sh": before });
+  const to = host.commit("after", { "/cmds.sh": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e deploy`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       deploy()
       ├─ prepare_env()
       ├─ restart_service()
     + └─ notify_done()
-  `);
+  `));
 });
 
-test("bash: ignores builtins and still tracks helper calls", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("bash: ignores builtins and still tracks helper calls", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       boot() {
         local x=1
         echo hello
@@ -176,19 +208,26 @@ test("bash: ignores builtins and still tracks helper calls", ({
 
       real_work() { :; }
     + more_work() { :; }
-    `,
-    "boot",
-    { file: "builtins.sh" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/builtins.sh": before });
+  const to = host.commit("after", { "/builtins.sh": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e boot`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       boot()
       ├─ real_work()
     + └─ more_work()
-  `);
+  `));
 });
 
-test("bash: helper refactor with nested if only", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("bash: helper refactor with nested if only", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       start() {
     -   setup
     +   init_all
@@ -206,10 +245,17 @@ test("bash: helper refactor with nested if only", ({ expectCallstack }) => {
       setup() { :; }
       load_cfg() { :; }
       default_cfg() { :; }
-    `,
-    "start",
-    { file: "start.sh" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/start.sh": before });
+  const to = host.commit("after", { "/start.sh": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e start`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       start()
     - ├─ setup()
     + ├─ init_all()
@@ -218,5 +264,5 @@ test("bash: helper refactor with nested if only", ({ expectCallstack }) => {
          └─ load_cfg()
       └─ else
          └─ default_cfg()
-  `);
+  `));
 });

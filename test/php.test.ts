@@ -1,10 +1,11 @@
-import { test } from "./expectCallstack.js";
+import { expect, test } from "vitest";
+import { diffOutdent } from "./diff-outdent.js";
+import { sourcesFromFileDiff } from "./file-diff.js";
+import { cliBody, workspace } from "./workspace.js";
 
-test("php: refactors calls into a helper with if/else", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("php: refactors calls into a helper with if/else", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       <?php
       class PiService {
           public static function create_agent_session(\$options) {
@@ -35,10 +36,17 @@ test("php: refactors calls into a helper with if/else", ({
           public function boot() {}
       }
       function create_coding_tools() {}
-    `,
-    "PiService.create_agent_session",
-    { file: "pi.php" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/pi.php": before });
+  const to = host.commit("after", { "/pi.php": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e PiService.create_agent_session`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       PiService.create_agent_session(options)
     - ├─ AuthStorage.create()
     - ├─ create_coding_tools()
@@ -51,12 +59,12 @@ test("php: refactors calls into a helper with if/else", ({
          └─ SessionManager.create()
       └─ else
          └─ SessionManager.open(id)
-  `);
+  `));
 });
 
-test("php: \$this->method resolves to Class.method", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("php: \$this->method resolves to Class.method", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       <?php
       class Runner {
           public function start() {
@@ -68,20 +76,27 @@ test("php: \$this->method resolves to Class.method", ({ expectCallstack }) => {
     +     public function validate() {}
           public function run() {}
       }
-    `,
-    "Runner.start",
-    { file: "runner.php" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/runner.php": before });
+  const to = host.commit("after", { "/runner.php": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e Runner.start`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       Runner.start()
       ├─ Runner.prepare()
     + ├─ Runner.validate()
       └─ Runner.run()
-  `);
+  `));
 });
 
-test("php: new Class expands through __construct", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("php: new Class expands through __construct", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       <?php
       function make() {
           new Thing();
@@ -94,22 +109,27 @@ test("php: new Class expands through __construct", ({ expectCallstack }) => {
       }
       function init() {}
     + function ready() {}
-    `,
-    "make",
-    { file: "ctor.php" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/ctor.php": before });
+  const to = host.commit("after", { "/ctor.php": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e make`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       make()
       └─ Thing()
          ├─ init()
     +    └─ ready()
-  `);
+  `));
 });
 
-test("php: does not attribute nested closure/arrow bodies", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("php: does not attribute nested closure/arrow bodies", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       <?php
       function outer() {
           \$f = function() { hidden(); };
@@ -121,19 +141,26 @@ test("php: does not attribute nested closure/arrow bodies", ({
       function also_hidden() {}
       function visible() {}
     + function also_visible() {}
-    `,
-    "outer",
-    { file: "nested.php" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/nested.php": before });
+  const to = host.commit("after", { "/nested.php": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e outer`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       outer()
       ├─ visible()
     + └─ also_visible()
-  `);
+  `));
 });
 
-test("php: elseif chains", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("php: elseif chains", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       <?php
       function handle(\$status) {
           if (\$status == 1) {
@@ -149,10 +176,17 @@ test("php: elseif chains", ({ expectCallstack }) => {
       function do_b() {}
     + function do_extra() {}
       function do_other() {}
-    `,
-    "handle",
-    { file: "elif.php" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/elif.php": before });
+  const to = host.commit("after", { "/elif.php": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e handle`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       handle(status)
       ├─ if \$status == 1
          └─ do_a()
@@ -161,12 +195,12 @@ test("php: elseif chains", ({ expectCallstack }) => {
     +    └─ do_extra()
       └─ else
          └─ do_other()
-  `);
+  `));
 });
 
-test("php: try/catch/finally as branches", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("php: try/catch/finally as branches", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       <?php
       function boot() {
           try {
@@ -182,10 +216,17 @@ test("php: try/catch/finally as branches", ({ expectCallstack }) => {
       function recover() {}
       function close_() {}
     + function flush() {}
-    `,
-    "boot",
-    { file: "try.php" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/try.php": before });
+  const to = host.commit("after", { "/try.php": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e boot`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       boot()
       ├─ try
          └─ open_()
@@ -194,12 +235,12 @@ test("php: try/catch/finally as branches", ({ expectCallstack }) => {
       ├─ finally
          └─ close_()
     + └─ flush()
-  `);
+  `));
 });
 
-test("php: self/parent and private methods", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("php: self/parent and private methods", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       <?php
       class Child {
           public function start() {
@@ -225,10 +266,17 @@ test("php: self/parent and private methods", ({ expectCallstack }) => {
     + function also() {}
       function hidden() {}
     + function audit() {}
-    `,
-    "Child.start",
-    { file: "scope.php" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/scope.php": before });
+  const to = host.commit("after", { "/scope.php": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e Child.start`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       Child.start()
       ├─ Child.helper()
       │  ├─ work()
@@ -239,5 +287,5 @@ test("php: self/parent and private methods", ({ expectCallstack }) => {
     + │  └─ audit()
     + └─ Child.extra()
     +    └─ also()
-  `);
+  `));
 });

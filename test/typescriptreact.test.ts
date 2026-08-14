@@ -1,10 +1,11 @@
-import { test } from "./expectCallstack.js";
+import { expect, test } from "vitest";
+import { diffOutdent } from "./diff-outdent.js";
+import { sourcesFromFileDiff } from "./file-diff.js";
+import { cliBody, workspace } from "./workspace.js";
 
-test("typescriptreact: tracks JSX components as calls", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("typescriptreact: tracks JSX components as calls", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       export function App() {
         setup();
     +   track();
@@ -19,20 +20,27 @@ test("typescriptreact: tracks JSX components as calls", ({
       function Button(_props: { onClick(): void }) {
         return null;
       }
-    `,
-    "App",
-    { file: "app.tsx" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/app.tsx": before });
+  const to = host.commit("after", { "/app.tsx": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e App`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       App()
       ├─ setup()
     + ├─ track()
       └─ Button(_props)
-  `);
+  `));
 });
 
-test("typescriptreact: diffs React component trees", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("typescriptreact: diffs React component trees", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       export function UserProfile({ userId }: { userId: string }) {
         const user = useUser(userId);
         if (!user) {
@@ -78,10 +86,17 @@ test("typescriptreact: diffs React component trees", ({ expectCallstack }) => {
         return null;
       }
       function trackFollow() {}
-    `,
-    "UserProfile",
-    { file: "UserProfile.tsx" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/UserProfile.tsx": before });
+  const to = host.commit("after", { "/UserProfile.tsx": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e UserProfile`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       UserProfile({})
       ├─ useUser(_id)
       ├─ if (!user)
@@ -96,14 +111,12 @@ test("typescriptreact: diffs React component trees", ({ expectCallstack }) => {
     +    ├─ UserMeta(_props)
     +    └─ FollowButton(_props)
     +       └─ trackFollow()
-  `);
+  `));
 });
 
-test("typescriptreact: recursive JSX keeps nested call-site children", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("typescriptreact: recursive JSX keeps nested call-site children", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       export function Foo() {
         return (
           <Foo>
@@ -119,13 +132,20 @@ test("typescriptreact: recursive JSX keeps nested call-site children", ({
     + function Baz() {
     +   return null;
     + }
-    `,
-    "Foo",
-    { file: "Foo.tsx" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/Foo.tsx": before });
+  const to = host.commit("after", { "/Foo.tsx": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e Foo`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       Foo()
       └─ Foo() ⇄
          ├─ Bar()
     +    └─ Baz()
-  `);
+  `));
 });

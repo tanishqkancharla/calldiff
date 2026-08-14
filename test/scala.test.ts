@@ -1,10 +1,11 @@
-import { test } from "./expectCallstack.js";
+import { expect, test } from "vitest";
+import { diffOutdent } from "./diff-outdent.js";
+import { sourcesFromFileDiff } from "./file-diff.js";
+import { cliBody, workspace } from "./workspace.js";
 
-test("scala: refactors calls into a helper with if/else", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("scala: refactors calls into a helper with if/else", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       object Pi {
         def createAgentSession(options: Options): Unit = {
     -     AuthStorage.create()
@@ -39,10 +40,17 @@ test("scala: refactors calls into a helper with if/else", ({
     + class Services {
     +   def boot(): Unit = {}
     + }
-    `,
-    "Pi.createAgentSession",
-    { file: "pi.scala" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/pi.scala": before });
+  const to = host.commit("after", { "/pi.scala": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e Pi.createAgentSession`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       Pi.createAgentSession(options)
     - ├─ AuthStorage.create()
     - ├─ Pi.createCodingTools()
@@ -55,12 +63,12 @@ test("scala: refactors calls into a helper with if/else", ({
          └─ SessionManager.create()
       └─ else
          └─ SessionManager.open(id)
-  `);
+  `));
 });
 
-test("scala: this.method resolves to Class.method", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("scala: this.method resolves to Class.method", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       class Runner {
         def start(): Unit = {
           this.prepare()
@@ -72,20 +80,27 @@ test("scala: this.method resolves to Class.method", ({ expectCallstack }) => {
     +   def validate(): Unit = {}
         def run(): Unit = {}
       }
-    `,
-    "Runner.start",
-    { file: "runner.scala" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/runner.scala": before });
+  const to = host.commit("after", { "/runner.scala": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e Runner.start`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       Runner.start()
       ├─ Runner.prepare()
     + ├─ Runner.validate()
       └─ Runner.run()
-  `);
+  `));
 });
 
-test("scala: Maker() expands through object apply", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("scala: Maker() expands through object apply", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       object Main {
         def make(): Unit = {
           Maker()
@@ -100,20 +115,27 @@ test("scala: Maker() expands through object apply", ({ expectCallstack }) => {
         def work(): Unit = {}
     +   def ready(): Unit = {}
       }
-    `,
-    "Main.make",
-    { file: "ctor.scala" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/ctor.scala": before });
+  const to = host.commit("after", { "/ctor.scala": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e Main.make`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       Main.make()
       └─ Maker()
          ├─ Maker.work()
     +    └─ Maker.ready()
-  `);
+  `));
 });
 
-test("scala: skips nested defs and lambdas", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("scala: skips nested defs and lambdas", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       object Main {
         def outer(): Unit = {
           def nested(): Unit = { hidden() }
@@ -126,19 +148,26 @@ test("scala: skips nested defs and lambdas", ({ expectCallstack }) => {
         def visible(): Unit = {}
     +   def alsoVisible(): Unit = {}
       }
-    `,
-    "Main.outer",
-    { file: "nested.scala" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/nested.scala": before });
+  const to = host.commit("after", { "/nested.scala": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e Main.outer`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       Main.outer()
       ├─ Main.visible()
     + └─ Main.alsoVisible()
-  `);
+  `));
 });
 
-test("scala: else-if chains", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("scala: else-if chains", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       object Ctrl {
         def handle(status: String): Unit = {
           if (status == "a") {
@@ -155,10 +184,17 @@ test("scala: else-if chains", ({ expectCallstack }) => {
     +   def doExtra(): Unit = {}
         def doOther(): Unit = {}
       }
-    `,
-    "Ctrl.handle",
-    { file: "elif.scala" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/elif.scala": before });
+  const to = host.commit("after", { "/elif.scala": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e Ctrl.handle`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       Ctrl.handle(status)
       ├─ if (status == "a")
          └─ Ctrl.doA()
@@ -167,14 +203,12 @@ test("scala: else-if chains", ({ expectCallstack }) => {
     +    └─ Ctrl.doExtra()
       └─ else
          └─ Ctrl.doOther()
-  `);
+  `));
 });
 
-test("scala: try/catch/finally and match as branches", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("scala: try/catch/finally and match as branches", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       object Ctrl {
         def boot(x: Int): Unit = {
           try {
@@ -197,10 +231,17 @@ test("scala: try/catch/finally and match as branches", ({
         def doOther(): Unit = {}
     +   def flush(): Unit = {}
       }
-    `,
-    "Ctrl.boot",
-    { file: "ctrl.scala" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/ctrl.scala": before });
+  const to = host.commit("after", { "/ctrl.scala": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e Ctrl.boot`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       Ctrl.boot(x)
       ├─ try
          └─ Ctrl.openIt()
@@ -213,12 +254,12 @@ test("scala: try/catch/finally and match as branches", ({
       ├─ case _
          └─ Ctrl.doOther()
     + └─ Ctrl.flush()
-  `);
+  `));
 });
 
-test("scala: object methods resolve as Type.method", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("scala: object methods resolve as Type.method", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       object Main {
         def boot(): Unit = {
           Helper.run()
@@ -235,14 +276,21 @@ test("scala: object methods resolve as Type.method", ({ expectCallstack }) => {
         def go(): Unit = {}
     +   def more(): Unit = {}
       }
-    `,
-    "Main.boot",
-    { file: "object.scala" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/object.scala": before });
+  const to = host.commit("after", { "/object.scala": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e Main.boot`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       Main.boot()
       ├─ Helper.run()
       │  └─ Helper.go()
     + └─ Helper.extra()
     +    └─ Helper.more()
-  `);
+  `));
 });

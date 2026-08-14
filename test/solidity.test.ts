@@ -1,10 +1,11 @@
-import { test } from "./expectCallstack.js";
+import { expect, test } from "vitest";
+import { diffOutdent } from "./diff-outdent.js";
+import { sourcesFromFileDiff } from "./file-diff.js";
+import { cliBody, workspace } from "./workspace.js";
 
-test("solidity: refactors calls into a helper with if/else", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("solidity: refactors calls into a helper with if/else", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       function createAgentSession(bool ok) {
     -   authStorageCreate();
     -   createCodingTools();
@@ -25,10 +26,17 @@ test("solidity: refactors calls into a helper with if/else", ({
       function createCodingTools() {}
       function sessionManagerCreate() {}
       function sessionManagerOpen() {}
-    `,
-    "createAgentSession",
-    { file: "pi.sol" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/pi.sol": before });
+  const to = host.commit("after", { "/pi.sol": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e createAgentSession`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       createAgentSession(ok)
     - ├─ authStorageCreate()
     - ├─ createCodingTools()
@@ -39,14 +47,12 @@ test("solidity: refactors calls into a helper with if/else", ({
          └─ sessionManagerCreate()
       └─ else
          └─ sessionManagerOpen()
-  `);
+  `));
 });
 
-test("solidity: this.method resolves to Contract.method", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("solidity: this.method resolves to Contract.method", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       contract Runner {
           function start() public {
               this.prepare();
@@ -57,22 +63,27 @@ test("solidity: this.method resolves to Contract.method", ({
     +     function validate() public {}
           function run() public {}
       }
-    `,
-    "Runner.start",
-    { file: "runner.sol" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/runner.sol": before });
+  const to = host.commit("after", { "/runner.sol": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e Runner.start`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       Runner.start()
       ├─ Runner.prepare()
     + ├─ Runner.validate()
       └─ Runner.run()
-  `);
+  `));
 });
 
-test("solidity: bare local calls resolve to Contract.fn", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("solidity: bare local calls resolve to Contract.fn", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       contract Svc {
           function start() public {
               prepare();
@@ -83,22 +94,27 @@ test("solidity: bare local calls resolve to Contract.fn", ({
     +     function validate() public {}
           function run() public {}
       }
-    `,
-    "Svc.start",
-    { file: "bare.sol" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/bare.sol": before });
+  const to = host.commit("after", { "/bare.sol": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e Svc.start`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       Svc.start()
       ├─ Svc.prepare()
     + ├─ Svc.validate()
       └─ Svc.run()
-  `);
+  `));
 });
 
-test("solidity: new Contract expands through constructor", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("solidity: new Contract expands through constructor", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       contract Thing {
           constructor() {
               init();
@@ -112,21 +128,28 @@ test("solidity: new Contract expands through constructor", ({
     +     also();
       }
     + function also() {}
-    `,
-    "make",
-    { file: "ctor.sol" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/ctor.sol": before });
+  const to = host.commit("after", { "/ctor.sol": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e make`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       make()
       ├─ new Thing()
       │  ├─ Thing.init()
     + │  └─ Thing.ready()
     + └─ also()
-  `);
+  `));
 });
 
-test("solidity: else-if chains", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("solidity: else-if chains", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       contract Runner {
           function handle(uint x) public {
               if (x == 1) {
@@ -143,10 +166,17 @@ test("solidity: else-if chains", ({ expectCallstack }) => {
     +     function doExtra() public {}
           function doC() public {}
       }
-    `,
-    "Runner.handle",
-    { file: "elseif.sol" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/elseif.sol": before });
+  const to = host.commit("after", { "/elseif.sol": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e Runner.handle`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       Runner.handle(x)
       ├─ if x == 1
          └─ Runner.doA()
@@ -155,12 +185,12 @@ test("solidity: else-if chains", ({ expectCallstack }) => {
     +    └─ Runner.doExtra()
       └─ else
          └─ Runner.doC()
-  `);
+  `));
 });
 
-test("solidity: constructor entrypoint body", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("solidity: constructor entrypoint body", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       contract Thing {
           constructor() {
               init();
@@ -169,19 +199,26 @@ test("solidity: constructor entrypoint body", ({ expectCallstack }) => {
           function init() private {}
     +     function ready() private {}
       }
-    `,
-    "Thing.constructor",
-    { file: "ctorentry.sol" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/ctorentry.sol": before });
+  const to = host.commit("after", { "/ctorentry.sol": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e Thing.constructor`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       new Thing()
       ├─ Thing.init()
     + └─ Thing.ready()
-  `);
+  `));
 });
 
-test("solidity: this. + bare calls together", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("solidity: this. + bare calls together", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       contract Mix {
           function boot() public {
               this.prepare();
@@ -192,13 +229,20 @@ test("solidity: this. + bare calls together", ({ expectCallstack }) => {
           function flush() public {}
     +     function finish() public {}
       }
-    `,
-    "Mix.boot",
-    { file: "mix.sol" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/mix.sol": before });
+  const to = host.commit("after", { "/mix.sol": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e Mix.boot`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       Mix.boot()
       ├─ Mix.prepare()
       ├─ Mix.flush()
     + └─ Mix.finish()
-  `);
+  `));
 });

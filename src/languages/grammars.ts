@@ -4,6 +4,8 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
@@ -15,6 +17,50 @@ export type GrammarModule = {
   tsx?: GrammarModule;
   [key: string]: unknown;
 };
+
+function sleepMs(ms: number): void {
+  const buf = new Int32Array(new SharedArrayBuffer(4));
+  Atomics.wait(buf, 0, 0, ms);
+}
+
+/**
+ * Serialize on-demand `npm install` into the shared grammar cache.
+ * Parallel CLI processes (and e2e tests) otherwise race and hit ENOTEMPTY.
+ */
+function withInstallLock(cacheDir: string, fn: () => void): void {
+  const lockDir = join(cacheDir, ".install.lock");
+  mkdirSync(cacheDir, { recursive: true });
+  const deadline = Date.now() + 120_000;
+  while (true) {
+    try {
+      mkdirSync(lockDir);
+      break;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code !== "EEXIST") throw err;
+      try {
+        const ageMs = Date.now() - statSync(lockDir).mtimeMs;
+        if (ageMs > 120_000) {
+          rmSync(lockDir, { recursive: true, force: true });
+          continue;
+        }
+      } catch {
+        // lock disappeared; retry mkdir
+      }
+      if (Date.now() > deadline) {
+        throw new Error(
+          `Timed out waiting for grammar install lock at ${lockDir}`,
+        );
+      }
+      sleepMs(50);
+    }
+  }
+  try {
+    fn();
+  } finally {
+    rmSync(lockDir, { recursive: true, force: true });
+  }
+}
 
 /** On-disk cache of npm-installed tree-sitter grammar packages. */
 export function grammarCacheDir(): string {
@@ -127,25 +173,28 @@ export function loadGrammarPackage(npmPackage: string): GrammarModule {
 
   const cacheDir = grammarCacheDir();
   if (!packageInstalled(cacheDir, npmPackage)) {
-    ensureCachePackageJson(cacheDir);
-    const installSpec = INSTALL_SPEC[npmPackage] ?? npmPackage;
-    execFileSync(
-      "npm",
-      [
-        "install",
-        "--prefix",
-        cacheDir,
-        "--no-save",
-        "--no-fund",
-        "--no-audit",
-        "--legacy-peer-deps",
-        installSpec,
-      ],
-      {
-        stdio: ["ignore", "pipe", "pipe"],
-        env: process.env,
-      },
-    );
+    withInstallLock(cacheDir, () => {
+      if (packageInstalled(cacheDir, npmPackage)) return;
+      ensureCachePackageJson(cacheDir);
+      const installSpec = INSTALL_SPEC[npmPackage] ?? npmPackage;
+      execFileSync(
+        "npm",
+        [
+          "install",
+          "--prefix",
+          cacheDir,
+          "--no-save",
+          "--no-fund",
+          "--no-audit",
+          "--legacy-peer-deps",
+          installSpec,
+        ],
+        {
+          stdio: ["ignore", "pipe", "pipe"],
+          env: process.env,
+        },
+      );
+    });
   }
 
   const require = createRequire(join(cacheDir, "package.json"));

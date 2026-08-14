@@ -30,11 +30,30 @@ Helpers: `namedChildren`, `childByType`, `collapseWs` from `./types.js`.
 - `src/extract.ts`, `src/git.ts` (parent updates)
 
 ## Tests
-Create `test/<id>.test.ts` using:
+Create `test/<id>.test.ts` as a `workspace()` CLI e2e test:
 ```ts
-import { test } from "./expectCallstack.js";
-test("...", ({ expectCallstack }) => {
-  expectCallstack(`...+/- fixture...`, "Entry.symbol", { file: "x.<ext>" }).toEqual(`...`);
+import { expect, test } from "vitest";
+import { diffOutdent } from "./diff-outdent.js";
+import { sourcesFromFileDiff } from "./file-diff.js";
+import { cliBody, workspace } from "./workspace.js";
+
+test("...", () => {
+  const { before, after } = sourcesFromFileDiff(diffOutdent(`
+    function entry() {
+  -   oldCall();
+  +   newCall();
+    }
+  `));
+  const host = workspace();
+  const from = host.commit("before", { "/file.<ext>": before });
+  const to = host.commit("after", { "/file.<ext>": after });
+  const result = host.run(`calldiff diff ${from} ${to} -e entry`);
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
+      entry()
+    - └─ oldCall()
+    + └─ newCall()
+  `));
 });
 ```
 At least 2 tests: (1) helper refactor + if/else (2) method/receiver resolution.

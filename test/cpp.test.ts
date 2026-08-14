@@ -1,10 +1,11 @@
-import { test } from "./expectCallstack.js";
+import { expect, test } from "vitest";
+import { diffOutdent } from "./diff-outdent.js";
+import { sourcesFromFileDiff } from "./file-diff.js";
+import { cliBody, workspace } from "./workspace.js";
 
-test("cpp: refactors calls into a helper with if/else", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("cpp: refactors calls into a helper with if/else", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       void CreateAgentSession(int options) {
     -   AuthStorage_create();
     -   create_coding_tools();
@@ -27,10 +28,17 @@ test("cpp: refactors calls into a helper with if/else", ({
       void SessionManager_create() {}
       void SessionManager_open(int id) {}
     + void services_boot() {}
-    `,
-    "CreateAgentSession",
-    { file: "pi.cpp" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/pi.cpp": before });
+  const to = host.commit("after", { "/pi.cpp": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e CreateAgentSession`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       CreateAgentSession(options)
     - ├─ AuthStorage_create()
     - ├─ create_coding_tools()
@@ -42,12 +50,12 @@ test("cpp: refactors calls into a helper with if/else", ({
          └─ SessionManager_create()
       └─ else
          └─ SessionManager_open(id)
-  `);
+  `));
 });
 
-test("cpp: this->method resolves to Class.method", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("cpp: this->method resolves to Class.method", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       class Runner {
       public:
         void start() {
@@ -59,22 +67,27 @@ test("cpp: this->method resolves to Class.method", ({ expectCallstack }) => {
     +   void validate() {}
         void run() {}
       };
-    `,
-    "Runner.start",
-    { file: "runner.cpp" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/runner.cpp": before });
+  const to = host.commit("after", { "/runner.cpp": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e Runner.start`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       Runner.start()
       ├─ Runner.prepare()
     + ├─ Runner.validate()
       └─ Runner.run()
-  `);
+  `));
 });
 
-test("cpp: new Class() expands through the constructor", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("cpp: new Class() expands through the constructor", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       void make() {
         new Thing();
       }
@@ -87,22 +100,27 @@ test("cpp: new Class() expands through the constructor", ({
       };
       void init() {}
     + void ready() {}
-    `,
-    "make",
-    { file: "ctor.cpp" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/ctor.cpp": before });
+  const to = host.commit("after", { "/ctor.cpp": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e make`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       make()
       └─ new Thing()
          ├─ init()
     +    └─ ready()
-  `);
+  `));
 });
 
-test("cpp: does not attribute lambda bodies to the caller", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("cpp: does not attribute lambda bodies to the caller", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       void outer() {
         auto f = []() { hidden(); };
         visible();
@@ -111,19 +129,26 @@ test("cpp: does not attribute lambda bodies to the caller", ({
       void hidden() {}
       void visible() {}
     + void also_visible() {}
-    `,
-    "outer",
-    { file: "lambda.cpp" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/lambda.cpp": before });
+  const to = host.commit("after", { "/lambda.cpp": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e outer`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       outer()
       ├─ visible()
     + └─ also_visible()
-  `);
+  `));
 });
 
-test("cpp: else-if chains", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("cpp: else-if chains", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       void handle(int status) {
         if (status == 1) {
           do_a();
@@ -138,10 +163,17 @@ test("cpp: else-if chains", ({ expectCallstack }) => {
       void do_b() {}
     + void do_extra() {}
       void do_other() {}
-    `,
-    "handle",
-    { file: "elif.cpp" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/elif.cpp": before });
+  const to = host.commit("after", { "/elif.cpp": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e handle`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       handle(status)
       ├─ if status == 1
          └─ do_a()
@@ -150,12 +182,12 @@ test("cpp: else-if chains", ({ expectCallstack }) => {
     +    └─ do_extra()
       └─ else
          └─ do_other()
-  `);
+  `));
 });
 
-test("cpp: try/catch as branches", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("cpp: try/catch as branches", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       void boot() {
         try {
           open_();
@@ -170,10 +202,17 @@ test("cpp: try/catch as branches", ({ expectCallstack }) => {
       void recover() {}
       void other() {}
     + void flush() {}
-    `,
-    "boot",
-    { file: "try.cpp" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/try.cpp": before });
+  const to = host.commit("after", { "/try.cpp": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e boot`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       boot()
       ├─ try
          └─ open_()
@@ -182,14 +221,12 @@ test("cpp: try/catch as branches", ({ expectCallstack }) => {
       ├─ catch (...)
          └─ other()
     + └─ flush()
-  `);
+  `));
 });
 
-test("cpp: static Class::method resolves and expands", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("cpp: static Class::method resolves and expands", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       class Runner {
       public:
         void start() {
@@ -207,22 +244,29 @@ test("cpp: static Class::method resolves and expands", ({
       void work() {}
     + void more() {}
     + void also() {}
-    `,
-    "Runner.start",
-    { file: "static.cpp" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/static.cpp": before });
+  const to = host.commit("after", { "/static.cpp": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e Runner.start`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       Runner.start()
       ├─ Runner.helper()
       │  ├─ work()
     + │  └─ more()
     + └─ Runner.extra()
     +    └─ also()
-  `);
+  `));
 });
 
-test("cpp: pointer arrow calls on receivers", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("cpp: pointer arrow calls on receivers", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       class Runner {
       public:
         void prepare() {}
@@ -234,13 +278,20 @@ test("cpp: pointer arrow calls on receivers", ({ expectCallstack }) => {
         r->run();
     +   r->validate();
       }
-    `,
-    "go",
-    { file: "arrow.cpp" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/arrow.cpp": before });
+  const to = host.commit("after", { "/arrow.cpp": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e go`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       go(r)
       ├─ r.prepare()
       ├─ r.run()
     + └─ r.validate()
-  `);
+  `));
 });

@@ -1,10 +1,11 @@
-import { test } from "./expectCallstack.js";
+import { expect, test } from "vitest";
+import { diffOutdent } from "./diff-outdent.js";
+import { sourcesFromFileDiff } from "./file-diff.js";
+import { cliBody, workspace } from "./workspace.js";
 
-test("python: refactors calls into a helper with if/else", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("python: refactors calls into a helper with if/else", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       class PiService:
           @staticmethod
           def create_agent_session(options):
@@ -41,10 +42,17 @@ test("python: refactors calls into a helper with if/else", ({
           pass
     +
     + services = None
-    `,
-    "PiService.create_agent_session",
-    { file: "pi.py" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/pi.py": before });
+  const to = host.commit("after", { "/pi.py": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e PiService.create_agent_session`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       PiService.create_agent_session(options)
     - ├─ AuthStorage.create()
     - ├─ create_coding_tools()
@@ -56,12 +64,12 @@ test("python: refactors calls into a helper with if/else", ({
          └─ SessionManager.create()
       └─ else
          └─ SessionManager.open(_id)
-  `);
+  `));
 });
 
-test("python: self.method resolves to Class.method", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("python: self.method resolves to Class.method", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       class Runner:
           def start(self):
               self.prepare()
@@ -76,20 +84,27 @@ test("python: self.method resolves to Class.method", ({ expectCallstack }) => {
 
           def run(self):
               pass
-    `,
-    "Runner.start",
-    { file: "runner.py" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/runner.py": before });
+  const to = host.commit("after", { "/runner.py": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e Runner.start`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       Runner.start(self)
       ├─ Runner.prepare(self)
     + ├─ Runner.validate(self)
       └─ Runner.run(self)
-  `);
+  `));
 });
 
-test("python: Class() expands through __init__", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("python: Class() expands through __init__", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       def make():
           Thing()
       class Thing:
@@ -100,22 +115,27 @@ test("python: Class() expands through __init__", ({ expectCallstack }) => {
           pass
     + def ready():
     +     pass
-    `,
-    "make",
-    { file: "ctor.py" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/ctor.py": before });
+  const to = host.commit("after", { "/ctor.py": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e make`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       make()
       └─ Thing()
          ├─ init()
     +    └─ ready()
-  `);
+  `));
 });
 
-test("python: indexes assigned lambdas; skips nested lambda bodies", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("python: indexes assigned lambdas; skips nested lambda bodies", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       def outer():
           f = lambda: hidden()
           visible()
@@ -132,40 +152,52 @@ test("python: indexes assigned lambdas; skips nested lambda bodies", ({
           pass
     + def more():
     +     pass
-    `,
-    "outer",
-    { file: "lambdas.py" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/lambdas.py": before });
+  const to = host.commit("after", { "/lambdas.py": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e outer`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       outer()
       ├─ visible()
     + └─ also_visible()
-  `);
+  `));
 });
 
-test("python: follows top-level assigned lambda entrypoints", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("python: follows top-level assigned lambda entrypoints", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
     - boot = lambda: load()
     + boot = lambda: [load(), go()]
       def load():
           pass
     + def go():
     +     pass
-    `,
-    "boot",
-    { file: "boot.py" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/boot.py": before });
+  const to = host.commit("after", { "/boot.py": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e boot`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       boot()
       ├─ load()
     + └─ go()
-  `);
+  `));
 });
 
-test("python: indexes @property methods like getters", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("python: indexes @property methods like getters", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       class Config:
           @property
           def value(self):
@@ -176,21 +208,26 @@ test("python: indexes @property methods like getters", ({ expectCallstack }) => 
           pass
     + def validate():
     +     pass
-    `,
-    "Config.value",
-    { file: "prop.py" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/prop.py": before });
+  const to = host.commit("after", { "/prop.py": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e Config.value`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       Config.value(self)
       ├─ load()
     + └─ validate()
-  `);
+  `));
 });
 
-test("python: try/except/finally and match/case as branches", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("python: try/except/finally and match/case as branches", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       def boot(x):
           try:
               open_()
@@ -216,10 +253,17 @@ test("python: try/except/finally and match/case as branches", ({
           pass
     + def flush():
     +     pass
-    `,
-    "boot",
-    { file: "ctrl.py" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/ctrl.py": before });
+  const to = host.commit("after", { "/ctrl.py": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e boot`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       boot(x)
       ├─ try
          └─ open_()
@@ -232,14 +276,12 @@ test("python: try/except/finally and match/case as branches", ({
       ├─ case _
          └─ do_other()
     + └─ flush()
-  `);
+  `));
 });
 
-test("python: super().method labeled as Class.method; ignores subscript calls", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("python: super().method labeled as Class.method; ignores subscript calls", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       class Child(Base):
           def start(self):
               super().setup()
@@ -248,20 +290,27 @@ test("python: super().method labeled as Class.method; ignores subscript calls", 
     +         work()
       def work():
           pass
-    `,
-    "Child.start",
-    { file: "super.py" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/super.py": before });
+  const to = host.commit("after", { "/super.py": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e Child.start`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       Child.start(self)
       ├─ Child.setup()
       ├─ obj.known()
     + └─ work()
-  `);
+  `));
 });
 
-test("python: elif chains", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("python: elif chains", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       def handle(status):
           if status == "a":
               do_a()
@@ -278,10 +327,17 @@ test("python: elif chains", ({ expectCallstack }) => {
     +     pass
       def do_other():
           pass
-    `,
-    "handle",
-    { file: "elif.py" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/elif.py": before });
+  const to = host.commit("after", { "/elif.py": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e handle`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       handle(status)
       ├─ if status == "a"
          └─ do_a()
@@ -290,5 +346,5 @@ test("python: elif chains", ({ expectCallstack }) => {
     +    └─ do_extra()
       └─ else
          └─ do_other()
-  `);
+  `));
 });

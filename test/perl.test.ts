@@ -1,10 +1,11 @@
-import { test } from "./expectCallstack.js";
+import { expect, test } from "vitest";
+import { diffOutdent } from "./diff-outdent.js";
+import { sourcesFromFileDiff } from "./file-diff.js";
+import { cliBody, workspace } from "./workspace.js";
 
-test("perl: refactors calls into a helper with if/else", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("perl: refactors calls into a helper with if/else", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       sub create_agent_session {
           my ($options) = @_;
       -   AuthStorage::create();
@@ -28,10 +29,17 @@ test("perl: refactors calls into a helper with if/else", ({
       sub AuthStorage::create { }
       sub SessionManager::create { }
       sub SessionManager::open { my ($id) = @_; }
-    `,
-    "create_agent_session",
-    { file: "pi.pl" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/pi.pl": before });
+  const to = host.commit("after", { "/pi.pl": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e create_agent_session`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       create_agent_session($options)
     - ├─ AuthStorage.create()
     - ├─ create_coding_tools()
@@ -43,14 +51,12 @@ test("perl: refactors calls into a helper with if/else", ({
          └─ SessionManager.open($id)
       └─ else
          └─ SessionManager.create()
-  `);
+  `));
 });
 
-test("perl: $self->method resolves to Package.method", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("perl: $self->method resolves to Package.method", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       package Runner;
 
       sub start {
@@ -63,22 +69,27 @@ test("perl: $self->method resolves to Package.method", ({
       sub prepare { }
       + sub validate { }
       sub run { }
-    `,
-    "Runner.start",
-    { file: "runner.pm" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/runner.pm": before });
+  const to = host.commit("after", { "/runner.pm": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e Runner.start`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       Runner.start()
       ├─ Runner.prepare()
     + ├─ Runner.validate()
       └─ Runner.run()
-  `);
+  `));
 });
 
-test("perl: qualified dispatch and nested packages resolve to dotted keys", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("perl: qualified dispatch and nested packages resolve to dotted keys", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       package My::App::Base;
 
       sub init { my ($self) = @_; log_init(); }
@@ -99,24 +110,29 @@ test("perl: qualified dispatch and nested packages resolve to dotted keys", ({
       package Util::Log;
 
       + sub emit { }
-    `,
-    "Child.create",
-    { file: "app.pm" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/app.pm": before });
+  const to = host.commit("after", { "/app.pm": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e Child.create`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       My.App.Child.create()
     - ├─ My.App.Child.setup()
     + ├─ My.App.Base.init()
     + │  └─ My.App.Base.log_init()
     + ├─ My.App.Child.finish()
     + └─ Util.Log.emit()
-  `);
+  `));
 });
 
-test("perl: paren-less, &sigil, and postfix-conditional calls resolve like plain calls", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("perl: paren-less, &sigil, and postfix-conditional calls resolve like plain calls", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       sub main_loop {
       -   setup();
       +   setup;
@@ -131,10 +147,17 @@ test("perl: paren-less, &sigil, and postfix-conditional calls resolve like plain
       sub init_hooks { }
       + sub Log::flush { }
       sub cleanup { }
-    `,
-    "main_loop",
-    { file: "calls.pl" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/calls.pl": before });
+  const to = host.commit("after", { "/calls.pl": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e main_loop`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       main_loop()
       ├─ setup()
       ├─ run_once()
@@ -142,14 +165,12 @@ test("perl: paren-less, &sigil, and postfix-conditional calls resolve like plain
     + ├─ Log.flush()
       └─ if $done
          └─ cleanup()
-  `);
+  `));
 });
 
-test("perl: indirect-object new matches Class->new; plain new(...) stays a call", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("perl: indirect-object new matches Class->new; plain new(...) stays a call", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       sub make {
       -   my $w = new Thing(load_config());
       +   my $w = Thing->new(load_config());
@@ -173,10 +194,17 @@ test("perl: indirect-object new matches Class->new; plain new(...) stays a call"
 
       sub init { my ($self) = @_; }
       + sub ready { }
-    `,
-    "make",
-    { file: "ctor.pl" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/ctor.pl": before });
+  const to = host.commit("after", { "/ctor.pl": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e make`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       make()
       ├─ new Thing($config)
       │  ├─ Thing.bless()
@@ -187,14 +215,12 @@ test("perl: indirect-object new matches Class->new; plain new(...) stays a call"
     + ├─ register()
       ├─ new()
       └─ helper()
-  `);
+  `));
 });
 
-test("perl: subroutine signatures drive the params label", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("perl: subroutine signatures drive the params label", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       use v5.36;
 
       sub notify ($user, $message, @tags) {
@@ -204,21 +230,26 @@ test("perl: subroutine signatures drive the params label", ({
 
       sub format_message ($message, @tags) { }
       + sub deliver ($user) { }
-    `,
-    "notify",
-    { file: "notify.pl" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/notify.pl": before });
+  const to = host.commit("after", { "/notify.pl": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e notify`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       notify($user, $message, @tags)
       ├─ format_message($message, @tags)
     + └─ deliver($user)
-  `);
+  `));
 });
 
-test("perl: shift @_ unpacks conventional params; comments and other arrays do not", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("perl: shift @_ unpacks conventional params; comments and other arrays do not", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       sub enqueue {
           # take the next job
           my $self = shift;
@@ -230,21 +261,26 @@ test("perl: shift @_ unpacks conventional params; comments and other arrays do n
 
       sub process { my ($job) = @_; }
       + sub audit { my ($job) = @_; }
-    `,
-    "enqueue",
-    { file: "queue.pl" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/queue.pl": before });
+  const to = host.commit("after", { "/queue.pl": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e enqueue`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       enqueue($job)
       ├─ process($job)
     + └─ audit($job)
-  `);
+  `));
 });
 
-test("perl: package block scopes methods and unless branches", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("perl: package block scopes methods and unless branches", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       package Cache {
           sub get {
               my ($self, $key) = @_;
@@ -258,22 +294,27 @@ test("perl: package block scopes methods and unless branches", ({
       -   sub reload { my ($self, $key) = @_; }
       +   sub fetch { my ($self, $key) = @_; }
       }
-    `,
-    "Cache.get",
-    { file: "cache.pm" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/cache.pm": before });
+  const to = host.commit("after", { "/cache.pm": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e Cache.get`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       Cache.get($key)
       └─ unless $self->{$key}
     -    ├─ Cache.reload($key)
     +    └─ Cache.fetch($key)
-  `);
+  `));
 });
 
-test("perl: 5.38 class methods resolve like package subs", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("perl: 5.38 class methods resolve like package subs", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       use v5.38;
       use experimental 'class';
 
@@ -293,22 +334,27 @@ test("perl: 5.38 class methods resolve like package subs", ({
 
           sub audit { my ($value) = @_; }
       }
-    `,
-    "Counter.increment",
-    { file: "counter.pl" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/counter.pl": before });
+  const to = host.commit("after", { "/counter.pl": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e Counter.increment`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       Counter.increment($by)
       ├─ Counter.log_change()
       │  └─ Counter.audit($value)
     + └─ Counter.clamp()
-  `);
+  `));
 });
 
-test("perl: elsif chains stay flat; loop bodies attribute to the caller", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("perl: elsif chains stay flat; loop bodies attribute to the caller", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       sub handle {
           my ($status, @jobs) = @_;
           if ($status eq 'a') {
@@ -329,10 +375,17 @@ test("perl: elsif chains stay flat; loop bodies attribute to the caller", ({
       + sub do_extra { }
       sub do_other { }
       sub run_job { my ($job) = @_; }
-    `,
-    "handle",
-    { file: "elsif.pl" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/elsif.pl": before });
+  const to = host.commit("after", { "/elsif.pl": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e handle`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       handle($status, @jobs)
       ├─ if $status eq 'a'
          └─ do_a()
@@ -342,12 +395,12 @@ test("perl: elsif chains stay flat; loop bodies attribute to the caller", ({
       ├─ else
          └─ do_other()
       └─ run_job($job)
-  `);
+  `));
 });
 
-test("perl: try/catch/finally and eval as branches", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("perl: try/catch/finally and eval as branches", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       use v5.40;
 
       sub boot {
@@ -368,10 +421,17 @@ test("perl: try/catch/finally and eval as branches", ({ expectCallstack }) => {
       sub close_ { }
       sub risky { }
       + sub flush { }
-    `,
-    "boot",
-    { file: "ctrl.pl" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/ctrl.pl": before });
+  const to = host.commit("after", { "/ctrl.pl": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e boot`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       boot()
       ├─ try
          └─ open_()
@@ -383,14 +443,12 @@ test("perl: try/catch/finally and eval as branches", ({ expectCallstack }) => {
     + ├─ eval
     +    └─ risky()
     + └─ flush()
-  `);
+  `));
 });
 
-test("perl: expression-position Try::Tiny stays calls; blocks are callbacks", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("perl: expression-position Try::Tiny stays calls; blocks are callbacks", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       use Try::Tiny;
 
       sub load_config {
@@ -402,22 +460,27 @@ test("perl: expression-position Try::Tiny stays calls; blocks are callbacks", ({
       sub read_file { }
       sub defaults { }
       + sub validate { my ($config) = @_; }
-    `,
-    "load_config",
-    { file: "config.pl" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/config.pl": before });
+  const to = host.commit("after", { "/config.pl": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e load_config`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       load_config()
       ├─ try()
       ├─ catch()
     + └─ validate($config)
-  `);
+  `));
 });
 
-test("perl: anonymous subs and block arguments are callbacks; a lone finally stays a call", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("perl: anonymous subs and block arguments are callbacks; a lone finally stays a call", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       sub outer {
           my $handler = sub { hidden(); };
           with_retries { hidden(); } 3;
@@ -433,15 +496,22 @@ test("perl: anonymous subs and block arguments are callbacks; a lone finally sta
       sub finally { my ($cb) = @_; }
       sub visible { my ($handler) = @_; }
       + sub also_visible { }
-    `,
-    "outer",
-    { file: "nested.pl" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/nested.pl": before });
+  const to = host.commit("after", { "/nested.pl": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e outer`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       outer()
       ├─ with_retries()
       ├─ visible_list()
       ├─ finally($cb)
       ├─ visible($handler)
     + └─ also_visible()
-  `);
+  `));
 });

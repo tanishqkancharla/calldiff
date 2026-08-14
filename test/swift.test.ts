@@ -1,10 +1,11 @@
-import { test } from "./expectCallstack.js";
+import { expect, test } from "vitest";
+import { diffOutdent } from "./diff-outdent.js";
+import { sourcesFromFileDiff } from "./file-diff.js";
+import { cliBody, workspace } from "./workspace.js";
 
-test("swift: refactors calls into a helper with if/else", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("swift: refactors calls into a helper with if/else", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       func createAgentSession(options: Options) {
     -   AuthStorage.create()
     -   createCodingTools()
@@ -37,10 +38,17 @@ test("swift: refactors calls into a helper with if/else", ({
     + class Services {
     +   func boot() {}
     + }
-    `,
-    "createAgentSession",
-    { file: "pi.swift" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/pi.swift": before });
+  const to = host.commit("after", { "/pi.swift": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e createAgentSession`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       createAgentSession(options)
     - ├─ AuthStorage.create()
     - ├─ createCodingTools()
@@ -53,12 +61,12 @@ test("swift: refactors calls into a helper with if/else", ({
          └─ SessionManager.create()
       └─ else
          └─ SessionManager.open(id)
-  `);
+  `));
 });
 
-test("swift: self.method resolves to Class.method", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("swift: self.method resolves to Class.method", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       class Runner {
         func start() {
           self.prepare()
@@ -70,20 +78,27 @@ test("swift: self.method resolves to Class.method", ({ expectCallstack }) => {
     +   func validate() {}
         func run() {}
       }
-    `,
-    "Runner.start",
-    { file: "runner.swift" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/runner.swift": before });
+  const to = host.commit("after", { "/runner.swift": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e Runner.start`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       Runner.start()
       ├─ Runner.prepare()
     + ├─ Runner.validate()
       └─ Runner.run()
-  `);
+  `));
 });
 
-test("swift: Thing() expands through init", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("swift: Thing() expands through init", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       func make() {
         Thing()
       }
@@ -95,20 +110,27 @@ test("swift: Thing() expands through init", ({ expectCallstack }) => {
       }
       func setup() {}
     + func ready() {}
-    `,
-    "make",
-    { file: "ctor.swift" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/ctor.swift": before });
+  const to = host.commit("after", { "/ctor.swift": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e make`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       make()
       └─ Thing()
          ├─ setup()
     +    └─ ready()
-  `);
+  `));
 });
 
-test("swift: skips nested functions and closures", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("swift: skips nested functions and closures", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       func outer() {
         func nested() { hidden() }
         let f = { alsoHidden() }
@@ -119,19 +141,26 @@ test("swift: skips nested functions and closures", ({ expectCallstack }) => {
       func alsoHidden() {}
       func visible() {}
     + func alsoVisible() {}
-    `,
-    "outer",
-    { file: "nested.swift" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/nested.swift": before });
+  const to = host.commit("after", { "/nested.swift": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e outer`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       outer()
       ├─ visible()
     + └─ alsoVisible()
-  `);
+  `));
 });
 
-test("swift: else-if chains", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("swift: else-if chains", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       func handle(status: String) {
         if status == "a" {
           doA()
@@ -146,10 +175,17 @@ test("swift: else-if chains", ({ expectCallstack }) => {
       func doB() {}
     + func doExtra() {}
       func doOther() {}
-    `,
-    "handle",
-    { file: "elif.swift" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/elif.swift": before });
+  const to = host.commit("after", { "/elif.swift": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e handle`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       handle(status)
       ├─ if status == "a"
          └─ doA()
@@ -158,12 +194,12 @@ test("swift: else-if chains", ({ expectCallstack }) => {
     +    └─ doExtra()
       └─ else
          └─ doOther()
-  `);
+  `));
 });
 
-test("swift: do/catch and switch as branches", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("swift: do/catch and switch as branches", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       func boot(x: Int) {
         do {
           try openIt()
@@ -183,10 +219,17 @@ test("swift: do/catch and switch as branches", ({ expectCallstack }) => {
       func doA() {}
       func doOther() {}
     + func flush() {}
-    `,
-    "boot",
-    { file: "ctrl.swift" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/ctrl.swift": before });
+  const to = host.commit("after", { "/ctrl.swift": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e boot`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       boot(x)
       ├─ do
          └─ openIt()
@@ -197,12 +240,12 @@ test("swift: do/catch and switch as branches", ({ expectCallstack }) => {
       ├─ default
          └─ doOther()
     + └─ flush()
-  `);
+  `));
 });
 
-test("swift: static methods expand like Type.method", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("swift: static methods expand like Type.method", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       func boot() {
         Thing.make()
     +   Thing.extra()
@@ -217,14 +260,21 @@ test("swift: static methods expand like Type.method", ({ expectCallstack }) => {
       }
       func work() {}
     + func more() {}
-    `,
-    "boot",
-    { file: "static.swift" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/static.swift": before });
+  const to = host.commit("after", { "/static.swift": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e boot`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       boot()
       ├─ Thing.make()
       │  └─ work()
     + └─ Thing.extra()
     +    └─ more()
-  `);
+  `));
 });

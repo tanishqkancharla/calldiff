@@ -1,10 +1,11 @@
-import { test } from "./expectCallstack.js";
+import { expect, test } from "vitest";
+import { diffOutdent } from "./diff-outdent.js";
+import { sourcesFromFileDiff } from "./file-diff.js";
+import { cliBody, workspace } from "./workspace.js";
 
-test("ocaml: refactors calls into a helper with if/else", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("ocaml: refactors calls into a helper with if/else", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       let create_agent_session options =
     -   auth_storage_create ();
     -   create_coding_tools ();
@@ -24,10 +25,17 @@ test("ocaml: refactors calls into a helper with if/else", ({
       and create_coding_tools () = ()
       and session_manager_create () = ()
       and session_manager_open _ = ()
-    `,
-    "create_agent_session",
-    { file: "pi.ml" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/pi.ml": before });
+  const to = host.commit("after", { "/pi.ml": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e create_agent_session`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       create_agent_session(options)
     - ├─ auth_storage_create()
     - ├─ create_coding_tools()
@@ -39,12 +47,12 @@ test("ocaml: refactors calls into a helper with if/else", ({
          └─ session_manager_create()
       └─ else
          └─ session_manager_open(_)
-  `);
+  `));
 });
 
-test("ocaml: module lets resolve to Module.value", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("ocaml: module lets resolve to Module.value", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       module Runner = struct
         let start r =
           prepare r;
@@ -54,20 +62,27 @@ test("ocaml: module lets resolve to Module.value", ({ expectCallstack }) => {
     +   and validate _ = ()
         and run _ = ()
       end
-    `,
-    "Runner.start",
-    { file: "runner.ml" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/runner.ml": before });
+  const to = host.commit("after", { "/runner.ml": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e Runner.start`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       Runner.start(r)
       ├─ Runner.prepare(_)
     + ├─ Runner.validate(_)
       └─ Runner.run(_)
-  `);
+  `));
 });
 
-test("ocaml: Module.fn qualified calls", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("ocaml: Module.fn qualified calls", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       let start () =
         Auth.create ();
     +   Session.open_ ();
@@ -84,20 +99,27 @@ test("ocaml: Module.fn qualified calls", ({ expectCallstack }) => {
       module Tools = struct
         let build () = ()
       end
-    `,
-    "start",
-    { file: "qual.ml" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/qual.ml": before });
+  const to = host.commit("after", { "/qual.ml": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e start`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       start()
       ├─ Auth.create()
     + ├─ Session.open_()
       └─ Tools.build()
-  `);
+  `));
 });
 
-test("ocaml: else-if chains", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("ocaml: else-if chains", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       let handle x =
         if x = 1 then do_a ()
         else if x = 2 then (
@@ -110,10 +132,17 @@ test("ocaml: else-if chains", ({ expectCallstack }) => {
       and do_b () = ()
     + and do_extra () = ()
       and do_c () = ()
-    `,
-    "handle",
-    { file: "elseif.ml" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/elseif.ml": before });
+  const to = host.commit("after", { "/elseif.ml": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e handle`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       handle(x)
       ├─ if x = 1
          └─ do_a()
@@ -122,14 +151,12 @@ test("ocaml: else-if chains", ({ expectCallstack }) => {
     +    └─ do_extra()
       └─ else
          └─ do_c()
-  `);
+  `));
 });
 
-test("ocaml: match and try/with as branches; skips nested funs", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("ocaml: match and try/with as branches; skips nested funs", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       let boot x =
         (match x with
          | 1 -> do_a ()
@@ -147,10 +174,17 @@ test("ocaml: match and try/with as branches; skips nested funs", ({
       and visible () = ()
       and hidden _ = ()
     + and flush () = ()
-    `,
-    "boot",
-    { file: "ctrl.ml" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/ctrl.ml": before });
+  const to = host.commit("after", { "/ctrl.ml": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e boot`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       boot(x)
       ├─ case 1
          └─ do_a()
@@ -162,33 +196,38 @@ test("ocaml: match and try/with as branches; skips nested funs", ({
          └─ recover()
       ├─ visible()
     + └─ flush()
-  `);
+  `));
 });
 
-test("ocaml: field calls on records", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("ocaml: field calls on records", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       let boot () =
         let s = { boot = (fun () -> ()) } in
         s.boot ();
     +   flush ()
 
       and flush () = ()
-    `,
-    "boot",
-    { file: "field.ml" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/field.ml": before });
+  const to = host.commit("after", { "/field.ml": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e boot`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       boot()
       ├─ s.boot()
     + └─ flush()
-  `);
+  `));
 });
 
-test("ocaml: module-local bare calls stay Module.prefixed", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("ocaml: module-local bare calls stay Module.prefixed", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       module Svc = struct
         let start () =
           prepare ();
@@ -196,12 +235,19 @@ test("ocaml: module-local bare calls stay Module.prefixed", ({
         and prepare () = ()
     +   and finish () = ()
       end
-    `,
-    "Svc.start",
-    { file: "local.ml" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/local.ml": before });
+  const to = host.commit("after", { "/local.ml": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e Svc.start`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       Svc.start()
       ├─ Svc.prepare()
     + └─ Svc.finish()
-  `);
+  `));
 });

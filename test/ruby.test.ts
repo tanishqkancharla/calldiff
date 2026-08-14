@@ -1,10 +1,11 @@
-import { test } from "./expectCallstack.js";
+import { expect, test } from "vitest";
+import { diffOutdent } from "./diff-outdent.js";
+import { sourcesFromFileDiff } from "./file-diff.js";
+import { cliBody, workspace } from "./workspace.js";
 
-test("ruby: refactors calls into a helper with if/else", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("ruby: refactors calls into a helper with if/else", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       def create_agent_session(options)
     -   AuthStorage.create
     -   create_coding_tools
@@ -23,10 +24,17 @@ test("ruby: refactors calls into a helper with if/else", ({
     + end
 
       def create_coding_tools; end
-    `,
-    "create_agent_session",
-    { file: "pi.rb" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/pi.rb": before });
+  const to = host.commit("after", { "/pi.rb": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e create_agent_session`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       create_agent_session(options)
     - ├─ AuthStorage.create()
     - ├─ create_coding_tools()
@@ -38,14 +46,12 @@ test("ruby: refactors calls into a helper with if/else", ({
          └─ SessionManager.create()
       └─ else
          └─ SessionManager.open()
-  `);
+  `));
 });
 
-test("ruby: bare/self methods resolve to Class.method", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("ruby: bare/self methods resolve to Class.method", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       class Runner
         def start
           prepare
@@ -56,20 +62,27 @@ test("ruby: bare/self methods resolve to Class.method", ({
     +   def validate; end
         def run; end
       end
-    `,
-    "Runner.start",
-    { file: "runner.rb" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/runner.rb": before });
+  const to = host.commit("after", { "/runner.rb": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e Runner.start`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       Runner.start()
       ├─ Runner.prepare()
     + ├─ Runner.validate()
       └─ Runner.run()
-  `);
+  `));
 });
 
-test("ruby: Foo.new expands through initialize", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("ruby: Foo.new expands through initialize", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       def make
         Thing.new
       end
@@ -81,22 +94,27 @@ test("ruby: Foo.new expands through initialize", ({ expectCallstack }) => {
         def init; end
     +   def ready; end
       end
-    `,
-    "make",
-    { file: "ctor.rb" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/ctor.rb": before });
+  const to = host.commit("after", { "/ctor.rb": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e make`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       make()
       └─ Thing()
          ├─ Thing.init()
     +    └─ Thing.ready()
-  `);
+  `));
 });
 
-test("ruby: lambdas/blocks not attributed to outer caller", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("ruby: lambdas/blocks not attributed to outer caller", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       def outer
         f = -> { hidden }
         g = lambda { also_hidden }
@@ -107,19 +125,26 @@ test("ruby: lambdas/blocks not attributed to outer caller", ({
       def also_hidden; end
       def visible; end
     + def also_visible; end
-    `,
-    "outer",
-    { file: "nested.rb" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/nested.rb": before });
+  const to = host.commit("after", { "/nested.rb": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e outer`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       outer()
       ├─ visible()
     + └─ also_visible()
-  `);
+  `));
 });
 
-test("ruby: elsif chains", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("ruby: elsif chains", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       def handle(status)
         if status == "a"
           do_a
@@ -134,10 +159,17 @@ test("ruby: elsif chains", ({ expectCallstack }) => {
       def do_b; end
     + def do_extra; end
       def do_other; end
-    `,
-    "handle",
-    { file: "elsif.rb" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/elsif.rb": before });
+  const to = host.commit("after", { "/elsif.rb": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e handle`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       handle(status)
       ├─ if status == "a"
          └─ do_a()
@@ -146,14 +178,12 @@ test("ruby: elsif chains", ({ expectCallstack }) => {
     +    └─ do_extra()
       └─ else
          └─ do_other()
-  `);
+  `));
 });
 
-test("ruby: begin/rescue/ensure and case/when as branches", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("ruby: begin/rescue/ensure and case/when as branches", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       def boot(x)
         begin
           open_
@@ -176,10 +206,17 @@ test("ruby: begin/rescue/ensure and case/when as branches", ({
       def do_a; end
       def do_other; end
     + def flush; end
-    `,
-    "boot",
-    { file: "ctrl.rb" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/ctrl.rb": before });
+  const to = host.commit("after", { "/ctrl.rb": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e boot`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       boot(x)
       ├─ begin
          └─ open_()
@@ -192,14 +229,12 @@ test("ruby: begin/rescue/ensure and case/when as branches", ({
       ├─ else
          └─ do_other()
     + └─ flush()
-  `);
+  `));
 });
 
-test("ruby: self.method and underscore helper still expand", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("ruby: self.method and underscore helper still expand", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       class Vault
         def open
           self.unlock
@@ -213,21 +248,28 @@ test("ruby: self.method and underscore helper still expand", ({
         def work; end
     +   def audit; end
       end
-    `,
-    "Vault.open",
-    { file: "self.rb" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/self.rb": before });
+  const to = host.commit("after", { "/self.rb": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e Vault.open`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       Vault.open()
       ├─ Vault.unlock()
       │  ├─ Vault.work()
     + │  └─ Vault.audit()
       └─ Vault._prep()
-  `);
+  `));
 });
 
-test("ruby: singleton class methods expand", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("ruby: singleton class methods expand", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       def run
         Config.load
     +   Config.validate
@@ -242,14 +284,21 @@ test("ruby: singleton class methods expand", ({ expectCallstack }) => {
         def self.read; end
     +   def self.check; end
       end
-    `,
-    "run",
-    { file: "singleton.rb" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/singleton.rb": before });
+  const to = host.commit("after", { "/singleton.rb": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e run`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       run()
       ├─ Config.load()
       │  └─ Config.read()
     + └─ Config.validate()
     +    └─ Config.check()
-  `);
+  `));
 });

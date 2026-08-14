@@ -1,10 +1,11 @@
-import { test } from "./expectCallstack.js";
+import { expect, test } from "vitest";
+import { diffOutdent } from "./diff-outdent.js";
+import { sourcesFromFileDiff } from "./file-diff.js";
+import { cliBody, workspace } from "./workspace.js";
 
-test("csharp: refactors calls into a helper with if/else", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("csharp: refactors calls into a helper with if/else", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       class PiService {
         public static void CreateAgentSession(int options) {
     -     AuthStorage.Create();
@@ -36,10 +37,17 @@ test("csharp: refactors calls into a helper with if/else", ({
       class Tools {
         public static void CreateCodingTools() {}
       }
-    `,
-    "PiService.CreateAgentSession",
-    { file: "pi.cs" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/pi.cs": before });
+  const to = host.commit("after", { "/pi.cs": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e PiService.CreateAgentSession`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       PiService.CreateAgentSession(options)
     - ├─ AuthStorage.Create()
     - ├─ Tools.CreateCodingTools()
@@ -52,12 +60,12 @@ test("csharp: refactors calls into a helper with if/else", ({
          └─ SessionManager.Create()
       └─ else
          └─ SessionManager.Open(id)
-  `);
+  `));
 });
 
-test("csharp: this.Method resolves to Class.Method", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("csharp: this.Method resolves to Class.Method", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       class Runner {
         public void Start() {
           this.Prepare();
@@ -68,22 +76,27 @@ test("csharp: this.Method resolves to Class.Method", ({ expectCallstack }) => {
     +   public void Validate() {}
         public void Run() {}
       }
-    `,
-    "Runner.Start",
-    { file: "runner.cs" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/runner.cs": before });
+  const to = host.commit("after", { "/runner.cs": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e Runner.Start`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       Runner.Start()
       ├─ Runner.Prepare()
     + ├─ Runner.Validate()
       └─ Runner.Run()
-  `);
+  `));
 });
 
-test("csharp: new Class() expands through the constructor", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("csharp: new Class() expands through the constructor", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       class Maker {
         public void Go() {
           new Thing();
@@ -99,22 +112,27 @@ test("csharp: new Class() expands through the constructor", ({
         public static void Init() {}
     +   public static void Ready() {}
       }
-    `,
-    "Maker.Go",
-    { file: "ctor.cs" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/ctor.cs": before });
+  const to = host.commit("after", { "/ctor.cs": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e Maker.Go`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       Maker.Go()
       └─ new Thing()
          ├─ Init()
     +    └─ Ready()
-  `);
+  `));
 });
 
-test("csharp: does not attribute nested local/lambda bodies", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("csharp: does not attribute nested local/lambda bodies", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       class Runner {
         public void Outer() {
           void Nested() {
@@ -131,19 +149,26 @@ test("csharp: does not attribute nested local/lambda bodies", ({
         public static void Visible() {}
     +   public static void AlsoVisible() {}
       }
-    `,
-    "Runner.Outer",
-    { file: "nested.cs" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/nested.cs": before });
+  const to = host.commit("after", { "/nested.cs": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e Runner.Outer`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       Runner.Outer()
       ├─ Visible()
     + └─ AlsoVisible()
-  `);
+  `));
 });
 
-test("csharp: else-if chains", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("csharp: else-if chains", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       class Handler {
         public void Handle(int status) {
           if (status == 1) {
@@ -162,10 +187,17 @@ test("csharp: else-if chains", ({ expectCallstack }) => {
     +   public static void DoExtra() {}
         public static void DoOther() {}
       }
-    `,
-    "Handler.Handle",
-    { file: "elif.cs" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/elif.cs": before });
+  const to = host.commit("after", { "/elif.cs": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e Handler.Handle`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       Handler.Handle(status)
       ├─ if status == 1
          └─ DoA()
@@ -174,14 +206,12 @@ test("csharp: else-if chains", ({ expectCallstack }) => {
     +    └─ DoExtra()
       └─ else
          └─ DoOther()
-  `);
+  `));
 });
 
-test("csharp: try/catch/finally and switch as branches", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("csharp: try/catch/finally and switch as branches", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       class Booter {
         public void Boot(int x) {
           try {
@@ -210,10 +240,17 @@ test("csharp: try/catch/finally and switch as branches", ({
         public static void DoOther() {}
     +   public static void Flush() {}
       }
-    `,
-    "Booter.Boot",
-    { file: "ctrl.cs" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/ctrl.cs": before });
+  const to = host.commit("after", { "/ctrl.cs": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e Booter.Boot`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       Booter.Boot(x)
       ├─ try
          └─ Open()
@@ -226,14 +263,12 @@ test("csharp: try/catch/finally and switch as branches", ({
       ├─ default
          └─ DoOther()
     + └─ Flush()
-  `);
+  `));
 });
 
-test("csharp: static methods expand; private methods still indexed", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("csharp: static methods expand; private methods still indexed", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       class Runner {
         public void Start() {
           Runner.Helper();
@@ -259,10 +294,17 @@ test("csharp: static methods expand; private methods still indexed", ({
         public static void Hidden() {}
     +   public static void Audit() {}
       }
-    `,
-    "Runner.Start",
-    { file: "static.cs" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/static.cs": before });
+  const to = host.commit("after", { "/static.cs": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e Runner.Start`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       Runner.Start()
       ├─ Runner.Helper()
       │  ├─ Work()
@@ -272,5 +314,5 @@ test("csharp: static methods expand; private methods still indexed", ({
     + │  └─ Audit()
     + └─ Runner.Extra()
     +    └─ Also()
-  `);
+  `));
 });

@@ -1,10 +1,11 @@
-import { test } from "./expectCallstack.js";
+import { expect, test } from "vitest";
+import { diffOutdent } from "./diff-outdent.js";
+import { sourcesFromFileDiff } from "./file-diff.js";
+import { cliBody, workspace } from "./workspace.js";
 
-test("kotlin: refactors calls into a helper with if/else", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("kotlin: refactors calls into a helper with if/else", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       fun createAgentSession(options: Options) {
     -   AuthStorage.create()
     -   createCodingTools()
@@ -41,10 +42,17 @@ test("kotlin: refactors calls into a helper with if/else", ({
     + class Services {
     +   fun boot() {}
     + }
-    `,
-    "createAgentSession",
-    { file: "pi.kt" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/pi.kt": before });
+  const to = host.commit("after", { "/pi.kt": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e createAgentSession`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       createAgentSession(options)
     - ├─ AuthStorage.create()
     - ├─ createCodingTools()
@@ -57,12 +65,12 @@ test("kotlin: refactors calls into a helper with if/else", ({
          └─ SessionManager.create()
       └─ else
          └─ SessionManager.open(id)
-  `);
+  `));
 });
 
-test("kotlin: this.method resolves to Class.method", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("kotlin: this.method resolves to Class.method", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       class Runner {
         fun start() {
           this.prepare()
@@ -74,20 +82,27 @@ test("kotlin: this.method resolves to Class.method", ({ expectCallstack }) => {
     +   fun validate() {}
         fun run() {}
       }
-    `,
-    "Runner.start",
-    { file: "runner.kt" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/runner.kt": before });
+  const to = host.commit("after", { "/runner.kt": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e Runner.start`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       Runner.start()
       ├─ Runner.prepare()
     + ├─ Runner.validate()
       └─ Runner.run()
-  `);
+  `));
 });
 
-test("kotlin: Thing() expands through init block", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("kotlin: Thing() expands through init block", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       fun make() {
         Thing()
       }
@@ -99,20 +114,27 @@ test("kotlin: Thing() expands through init block", ({ expectCallstack }) => {
       }
       fun setup() {}
     + fun ready() {}
-    `,
-    "make",
-    { file: "ctor.kt" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/ctor.kt": before });
+  const to = host.commit("after", { "/ctor.kt": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e make`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       make()
       └─ Thing()
          ├─ setup()
     +    └─ ready()
-  `);
+  `));
 });
 
-test("kotlin: skips nested functions and lambdas", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("kotlin: skips nested functions and lambdas", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       fun outer() {
         fun nested() { hidden() }
         val f = { alsoHidden() }
@@ -123,19 +145,26 @@ test("kotlin: skips nested functions and lambdas", ({ expectCallstack }) => {
       fun alsoHidden() {}
       fun visible() {}
     + fun alsoVisible() {}
-    `,
-    "outer",
-    { file: "nested.kt" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/nested.kt": before });
+  const to = host.commit("after", { "/nested.kt": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e outer`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       outer()
       ├─ visible()
     + └─ alsoVisible()
-  `);
+  `));
 });
 
-test("kotlin: else-if chains", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("kotlin: else-if chains", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       fun handle(status: String) {
         if (status == "a") {
           doA()
@@ -150,10 +179,17 @@ test("kotlin: else-if chains", ({ expectCallstack }) => {
       fun doB() {}
     + fun doExtra() {}
       fun doOther() {}
-    `,
-    "handle",
-    { file: "elif.kt" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/elif.kt": before });
+  const to = host.commit("after", { "/elif.kt": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e handle`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       handle(status)
       ├─ if status == "a"
          └─ doA()
@@ -162,14 +198,12 @@ test("kotlin: else-if chains", ({ expectCallstack }) => {
     +    └─ doExtra()
       └─ else
          └─ doOther()
-  `);
+  `));
 });
 
-test("kotlin: try/catch/finally and when as branches", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("kotlin: try/catch/finally and when as branches", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       fun boot(x: Int) {
         try {
           openIt()
@@ -190,10 +224,17 @@ test("kotlin: try/catch/finally and when as branches", ({
       fun doA() {}
       fun doOther() {}
     + fun flush() {}
-    `,
-    "boot",
-    { file: "ctrl.kt" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/ctrl.kt": before });
+  const to = host.commit("after", { "/ctrl.kt": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e boot`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       boot(x)
       ├─ try
          └─ openIt()
@@ -206,12 +247,12 @@ test("kotlin: try/catch/finally and when as branches", ({
       ├─ else
          └─ doOther()
     + └─ flush()
-  `);
+  `));
 });
 
-test("kotlin: companion object and object methods", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("kotlin: companion object and object methods", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       fun boot() {
         Helper.run()
         Thing.make()
@@ -235,10 +276,17 @@ test("kotlin: companion object and object methods", ({ expectCallstack }) => {
       fun go() {}
       fun work() {}
     + fun more() {}
-    `,
-    "boot",
-    { file: "companion.kt" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/companion.kt": before });
+  const to = host.commit("after", { "/companion.kt": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e boot`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       boot()
       ├─ Helper.run()
       │  └─ go()
@@ -246,35 +294,38 @@ test("kotlin: companion object and object methods", ({ expectCallstack }) => {
       │  └─ work()
     + └─ Thing.extra()
     +    └─ more()
-  `);
+  `));
 });
 
-test("kotlin: trailing-lambda body nests under the receiving call", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("kotlin: trailing-lambda body nests under the receiving call", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
     + fun outer() {
     +   runBlocking {
     +     work()
     +   }
     + }
       fun work() {}
-    `,
-    "outer",
-    { file: "lambda.kt" },
-  ).toEqual(`
-      outer()
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/lambda.kt": before });
+  const to = host.commit("after", { "/lambda.kt": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e outer`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
+    + outer()
     + └─ runBlocking()
     +    └─ work()
-  `);
+  `));
 });
 
-test("kotlin: nested trailing lambdas nest transitively", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("kotlin: nested trailing lambdas nest transitively", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
     + fun outer() {
     +   wrap {
     +     use {
@@ -283,41 +334,51 @@ test("kotlin: nested trailing lambdas nest transitively", ({
     +   }
     + }
       fun work() {}
-    `,
-    "outer",
-    { file: "nested-lambda.kt" },
-  ).toEqual(`
-      outer()
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/nested-lambda.kt": before });
+  const to = host.commit("after", { "/nested-lambda.kt": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e outer`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
+    + outer()
     + └─ wrap()
     +    └─ use()
     +       └─ work()
-  `);
+  `));
 });
 
-test("kotlin: parenthesized lambda argument nests under the call", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("kotlin: parenthesized lambda argument nests under the call", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
     + fun outer() {
     +   submit(3, { work() })
     + }
       fun work() {}
-    `,
-    "outer",
-    { file: "paren-lambda.kt" },
-  ).toEqual(`
-      outer()
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/paren-lambda.kt": before });
+  const to = host.commit("after", { "/paren-lambda.kt": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e outer`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
+    + outer()
     + └─ submit()
     +    └─ work()
-  `);
+  `));
 });
 
-test("kotlin: call added inside an existing lambda diffs as an added child", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("kotlin: call added inside an existing lambda diffs as an added child", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       fun outer() {
         runBlocking {
           work()
@@ -326,34 +387,46 @@ test("kotlin: call added inside an existing lambda diffs as an added child", ({
       }
       fun work() {}
     + fun extra() {}
-    `,
-    "outer",
-    { file: "lambda-diff.kt" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/lambda-diff.kt": before });
+  const to = host.commit("after", { "/lambda-diff.kt": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e outer`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       outer()
       └─ runBlocking()
          ├─ work()
     +    └─ extra()
-  `);
+  `));
 });
 
-test("kotlin: args plus trailing lambda keeps the call and nests the body", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("kotlin: args plus trailing lambda keeps the call and nests the body", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
     + fun outer(roots: List<String>) {
     +   store.read(roots) { row ->
     +     handle(row)
     +   }
     + }
       fun handle(row: String) {}
-    `,
-    "outer",
-    { file: "args-lambda.kt" },
-  ).toEqual(`
-      outer(roots)
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/args-lambda.kt": before });
+  const to = host.commit("after", { "/args-lambda.kt": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e outer`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
+    + outer(roots)
     + └─ store.read()
     +    └─ handle(row)
-  `);
+  `));
 });

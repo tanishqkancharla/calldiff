@@ -1,10 +1,11 @@
-import { test } from "./expectCallstack.js";
+import { expect, test } from "vitest";
+import { diffOutdent } from "./diff-outdent.js";
+import { sourcesFromFileDiff } from "./file-diff.js";
+import { cliBody, workspace } from "./workspace.js";
 
-test("zig: refactors calls into a helper with if/else", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("zig: refactors calls into a helper with if/else", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       fn createAgentSession(options: Options) void {
     -   authStorageCreate();
     -   createCodingTools();
@@ -31,10 +32,17 @@ test("zig: refactors calls into a helper with if/else", ({
     + const Services = struct {
     +   fn boot(self: Services) void {}
     + };
-    `,
-    "createAgentSession",
-    { file: "pi.zig" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/pi.zig": before });
+  const to = host.commit("after", { "/pi.zig": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e createAgentSession`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       createAgentSession(options)
     - ├─ authStorageCreate()
     - ├─ createCodingTools()
@@ -46,12 +54,12 @@ test("zig: refactors calls into a helper with if/else", ({
          └─ sessionManagerCreate()
       └─ else
          └─ sessionManagerOpen(id)
-  `);
+  `));
 });
 
-test("zig: self.method resolves to Type.method", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("zig: self.method resolves to Type.method", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       const Runner = struct {
           fn start(self: *Runner) void {
               self.prepare();
@@ -62,20 +70,27 @@ test("zig: self.method resolves to Type.method", ({ expectCallstack }) => {
     +     fn validate(self: *Runner) void {}
           fn run(self: *Runner) void {}
       };
-    `,
-    "Runner.start",
-    { file: "runner.zig" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/runner.zig": before });
+  const to = host.commit("after", { "/runner.zig": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e Runner.start`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       Runner.start(self)
       ├─ Runner.prepare(self)
     + ├─ Runner.validate(self)
       └─ Runner.run(self)
-  `);
+  `));
 });
 
-test("zig: else-if chains", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("zig: else-if chains", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       fn handle(x: i32) void {
         if (x == 1) {
           doA();
@@ -90,10 +105,17 @@ test("zig: else-if chains", ({ expectCallstack }) => {
       fn doB() void {}
     + fn doExtra() void {}
       fn doC() void {}
-    `,
-    "handle",
-    { file: "elseif.zig" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/elseif.zig": before });
+  const to = host.commit("after", { "/elseif.zig": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e handle`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       handle(x)
       ├─ if x == 1
          └─ doA()
@@ -102,14 +124,12 @@ test("zig: else-if chains", ({ expectCallstack }) => {
     +    └─ doExtra()
       └─ else
          └─ doC()
-  `);
+  `));
 });
 
-test("zig: try and defer as branches; skips nested struct fns", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("zig: try and defer as branches; skips nested struct fns", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       fn boot(x: i32) !void {
         try open_();
         defer close();
@@ -123,10 +143,17 @@ test("zig: try and defer as branches; skips nested struct fns", ({
       fn close() void {}
       fn visible() void {}
     + fn flush() void {}
-    `,
-    "boot",
-    { file: "try.zig" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/try.zig": before });
+  const to = host.commit("after", { "/try.zig": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e boot`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       boot(x)
       ├─ try
          └─ open_()
@@ -134,12 +161,12 @@ test("zig: try and defer as branches; skips nested struct fns", ({
          └─ close()
       ├─ visible()
     + └─ flush()
-  `);
+  `));
 });
 
-test("zig: switch cases as branches", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("zig: switch cases as branches", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       fn handle(x: i32) void {
         switch (x) {
           1 => doA(),
@@ -150,41 +177,55 @@ test("zig: switch cases as branches", ({ expectCallstack }) => {
       fn doA() void {}
       fn doC() void {}
     + fn flush() void {}
-    `,
-    "handle",
-    { file: "switch.zig" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/switch.zig": before });
+  const to = host.commit("after", { "/switch.zig": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e handle`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       handle(x)
       ├─ case 1
          └─ doA()
       ├─ else
          └─ doC()
     + └─ flush()
-  `);
+  `));
 });
 
-test("zig: free function helper expansion", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("zig: free function helper expansion", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       fn make() void {
         init();
     +   ready();
       }
       fn init() void {}
     + fn ready() void {}
-    `,
-    "make",
-    { file: "init.zig" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/init.zig": before });
+  const to = host.commit("after", { "/init.zig": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e make`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       make()
       ├─ init()
     + └─ ready()
-  `);
+  `));
 });
 
-test("zig: else-if + try combined control flow", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("zig: else-if + try combined control flow", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       fn boot(x: i32) !void {
         if (x == 1) {
           doA();
@@ -201,10 +242,17 @@ test("zig: else-if + try combined control flow", ({ expectCallstack }) => {
       fn doC() void {}
       fn open_() !void {}
     + fn visible() void {}
-    `,
-    "boot",
-    { file: "combo.zig" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/combo.zig": before });
+  const to = host.commit("after", { "/combo.zig": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e boot`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       boot(x)
       ├─ if x == 1
          └─ doA()
@@ -215,5 +263,5 @@ test("zig: else-if + try combined control flow", ({ expectCallstack }) => {
       ├─ try
          └─ open_()
     + └─ visible()
-  `);
+  `));
 });

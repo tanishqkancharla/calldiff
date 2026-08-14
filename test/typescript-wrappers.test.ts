@@ -1,12 +1,14 @@
-import { expect, test as vitestTest } from "vitest";
-import { buildIndex, extractFunctions } from "../src/extract.js";
-import { test } from "./expectCallstack.js";
+import { expect, test } from "vitest";
+import { outdent } from "outdent";
+import { diffOutdent } from "./diff-outdent.js";
+import { sourcesFromFileDiff } from "./file-diff.js";
+import { cliBody, workspace } from "./workspace.js";
 
-test("typescript: extracts a named function passed to a wrapper call", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+const src = outdent({ trimTrailingNewline: false });
+
+test("typescript: extracts a named function passed to a wrapper call", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       export default defineEventHandler(function handleCreate(event) {
     -   validateBody(event);
     +   const input = parseBody(event);
@@ -21,10 +23,17 @@ test("typescript: extracts a named function passed to a wrapper call", ({
     +   readValidatedBody(event);
     +   return input;
     + }
-    `,
-    "handleCreate",
-    { file: "api/create.post.ts" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/api/create.post.ts": before });
+  const to = host.commit("after", { "/api/create.post.ts": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e handleCreate`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       handleCreate(event)
     - ├─ validateBody()
     + ├─ parseBody(event)
@@ -33,142 +42,182 @@ test("typescript: extracts a named function passed to a wrapper call", ({
          └─ throwBadRequest()
       └─ else
          └─ persist()
-  `);
+  `));
 });
 
-vitestTest("anonymous wrapped default exports are keyed by file path", () => {
-  const source =
-    "export default defineEventHandler(async (event) => { requireUserSession(event) })";
+test("anonymous wrapped default exports are keyed by file path", () => {
+  const source = src`
+    export default defineEventHandler(async (event) => {
+      requireUserSession(event);
+    });
+  `;
+  const host = workspace({
+    "/apps/app/server/api/organization/index.post.ts": source,
+    "/apps/admin/server/api/billing/plans/index.post.ts": source,
+  });
 
-  const organization = extractFunctions(
-    "apps/app/server/api/organization/index.post.ts",
-    source,
+  const organization = host.run(
+    "calldiff tree --file apps/app/server/api/organization/index.post.ts",
   );
-  const plans = extractFunctions(
-    "apps/admin/server/api/billing/plans/index.post.ts",
-    source,
+  const plans = host.run(
+    "calldiff tree --file apps/admin/server/api/billing/plans/index.post.ts",
   );
 
-  expect(organization.map((fn) => fn.key)).toEqual([
-    "apps/app/server/api/organization/index.post",
-  ]);
-  expect(plans.map((fn) => fn.key)).toEqual([
-    "apps/admin/server/api/billing/plans/index.post",
-  ]);
-
-  // Keyed by stem alone these collide, and one handler shadows the other.
-  const index = buildIndex([...organization, ...plans]);
-  expect(index.size).toBe(2);
+  expect(organization.code).toBe(0);
+  expect(plans.code).toBe(0);
+  expect(cliBody(organization.stdout)).toEqual(src`
+    apps/app/server/api/organization/index.post(event)
+    └─ requireUserSession()
+  `.trimEnd());
+  expect(cliBody(plans.stdout)).toEqual(src`
+    apps/admin/server/api/billing/plans/index.post(event)
+    └─ requireUserSession()
+  `.trimEnd());
 });
 
-vitestTest("wrapper arguments keep their call steps", () => {
-  const [handler] = extractFunctions(
-    "apps/app/server/api/organization/index.post.ts",
-    `export default defineEventHandler(async (event) => {
-       requireUserSession(event)
-       readValidatedBody(event)
-       useDrizzle()
-     })`,
+test("wrapper arguments keep their call steps", () => {
+  const host = workspace({
+    "/apps/app/server/api/organization/index.post.ts": src`
+      export default defineEventHandler(async (event) => {
+        requireUserSession(event);
+        readValidatedBody(event);
+        useDrizzle();
+      });
+    `,
+  });
+
+  const result = host.run(
+    "calldiff tree --file apps/app/server/api/organization/index.post.ts",
   );
 
-  expect(handler?.steps.map((step) => step.type === "call" && step.key)).toEqual(
-    ["requireUserSession", "readValidatedBody", "useDrizzle"],
-  );
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toEqual(src`
+    apps/app/server/api/organization/index.post(event)
+    ├─ requireUserSession()
+    ├─ readValidatedBody()
+    └─ useDrizzle()
+  `.trimEnd());
 });
 
-vitestTest("wrapper calls in variable declarators are unwrapped", () => {
-  const functions = extractFunctions(
-    "server/api/orders/index.post.ts",
-    `export const handler = defineEventHandler(async (event) => { charlie(event) })
-     const cached = defineCachedFunction(async () => { delta() })
-     export const named = defineEventHandler(function inner(event) { echo(event) })
-     const plain = (input) => { golf(input) }`,
-  );
+test("wrapper calls in variable declarators are unwrapped", () => {
+  const host = workspace({
+    "/server/api/orders/index.post.ts": src`
+      export const handler = defineEventHandler(async (event) => { charlie(event) })
+      const cached = defineCachedFunction(async () => { delta() })
+      export const named = defineEventHandler(function inner(event) { echo(event) })
+      const plain = (input) => { golf(input) }
+    `,
+  });
 
-  // Anonymous callbacks take the declared variable name; a named function
-  // expression keeps its own, as it does for a default export.
-  expect(functions.map((fn) => [fn.key, fn.exported])).toEqual([
-    ["handler", true],
-    ["cached", false],
-    ["inner", true],
-    ["plain", false],
-  ]);
+  const exported = host.run("calldiff tree --file server/api/orders/index.post.ts");
+  expect(exported.code).toBe(0);
+  expect(cliBody(exported.stdout)).toEqual(src`
+    handler(event)
+    └─ charlie()
 
-  const [handler] = functions;
-  expect(handler?.steps.map((step) => step.type === "call" && step.key)).toEqual(
-    ["charlie"],
-  );
+    inner(event)
+    └─ echo()
+  `.trimEnd());
+
+  const cached = host.run("calldiff tree -e cached");
+  expect(cached.code).toBe(0);
+  expect(cliBody(cached.stdout)).toContain("delta()");
+
+  const plain = host.run("calldiff tree -e plain");
+  expect(plain.code).toBe(0);
+  expect(cliBody(plain.stdout)).toContain("golf()");
 });
 
-vitestTest("type wrappers around a callback are peeled off", () => {
-  const functions = extractFunctions(
-    "server/handlers.ts",
-    `export const satisfied = defineEventHandler(((event) => { a(event) }) satisfies EventHandler)
-     export const asserted = defineEventHandler(((event) => { b(event) }) as EventHandler)
-     export const parenthesized = defineEventHandler(((event) => { c(event) }))
-     export const angled = defineEventHandler(<EventHandler>((event) => { d(event) }))
-     export const generated = Effect.gen((function* () { e() }) satisfies Gen)`,
-  );
+test("type wrappers around a callback are peeled off", () => {
+  const host = workspace({
+    "/server/handlers.ts": src`
+      export const satisfied = defineEventHandler(((event) => { a(event) }) satisfies EventHandler)
+      export const asserted = defineEventHandler(((event) => { b(event) }) as EventHandler)
+      export const parenthesized = defineEventHandler(((event) => { c(event) }))
+      export const angled = defineEventHandler(<EventHandler>((event) => { d(event) }))
+      export const generated = Effect.gen((function* () { e() }) satisfies Gen)
+    `,
+  });
 
-  expect(functions.map((fn) => fn.key)).toEqual([
-    "satisfied",
-    "asserted",
-    "parenthesized",
-    "angled",
-    "generated",
-  ]);
-  expect(functions[0]?.steps.map((s) => s.type === "call" && s.key)).toEqual([
-    "a",
-  ]);
+  const result = host.run("calldiff tree --file server/handlers.ts");
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toEqual(src`
+    angled(event)
+    └─ d()
+
+    asserted(event)
+    └─ b()
+
+    generated()
+    └─ e()
+
+    parenthesized(event)
+    └─ c()
+
+    satisfied(event)
+    └─ a()
+  `.trimEnd());
 });
 
-vitestTest("type wrappers around the wrapper call itself are peeled off", () => {
-  const functions = extractFunctions(
-    "server/api/orders/index.post.ts",
-    `export default (defineEventHandler((event) => { chargeCard(event) })) as EventHandler`,
-  );
+test("type wrappers around the wrapper call itself are peeled off", () => {
+  const host = workspace({
+    "/server/api/orders/index.post.ts": src`
+      export default (defineEventHandler((event) => { chargeCard(event) })) as EventHandler
+    `,
+  });
 
-  expect(functions.map((fn) => [fn.key, fn.exported])).toEqual([
-    ["server/api/orders/index.post", true],
-  ]);
+  const result = host.run("calldiff tree --file server/api/orders/index.post.ts");
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toEqual(src`
+    server/api/orders/index.post(event)
+    └─ chargeCard()
+  `.trimEnd());
 });
 
-vitestTest("a call argument holding no function does not stop the scan", () => {
-  const functions = extractFunctions(
-    "server/handlers.ts",
-    `export const handler = createHandler(makeOptions(), async () => { chargeCard() })
-     export const effectful = Layer.effect(makeTag(), Effect.gen(function* () { init() }))`,
-  );
+test("a call argument holding no function does not stop the scan", () => {
+  const host = workspace({
+    "/server/handlers.ts": src`
+      export const handler = createHandler(makeOptions(), async () => { chargeCard() })
+      export const effectful = Layer.effect(makeTag(), Effect.gen(function* () { init() }))
+    `,
+  });
 
-  expect(functions.map((fn) => fn.key)).toEqual(["handler", "effectful"]);
-  expect(functions[0]?.steps.map((s) => s.type === "call" && s.key)).toEqual([
-    "chargeCard",
-  ]);
+  const result = host.run("calldiff tree --file server/handlers.ts");
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toEqual(src`
+    effectful()
+    └─ init()
+
+    handler()
+    └─ chargeCard()
+  `.trimEnd());
 });
 
-vitestTest("generator arguments to wrapper calls are unwrapped", () => {
-  const functions = extractFunctions(
-    "svc/user.ts",
-    `export const getUser = Effect.gen(function* () {
-       const cfg = yield* Config
-       return yield* findUser(cfg.id)
-     })
-     export const layer = Layer.effect(Tag, Effect.gen(function* () { init() }))`,
-  );
+test("generator arguments to wrapper calls are unwrapped", () => {
+  const host = workspace({
+    "/svc/user.ts": src`
+      export const getUser = Effect.gen(function* () {
+        const cfg = yield* Config
+        return yield* findUser(cfg.id)
+      })
+      export const layer = Layer.effect(Tag, Effect.gen(function* () { init() }))
+    `,
+  });
 
-  expect(functions.map((fn) => [fn.key, fn.exported])).toEqual([
-    ["getUser", true],
-    ["layer", true],
-  ]);
-  // `yield* Config` is a bare reference, so only the real calls are steps.
-  expect(functions[0]?.steps.map((s) => s.type === "call" && s.key)).toEqual([
-    "findUser",
-  ]);
+  const result = host.run("calldiff tree --file svc/user.ts");
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toEqual(src`
+    getUser()
+    └─ findUser()
+
+    layer()
+    └─ init()
+  `.trimEnd());
 });
 
-test("tsx: diffs a component wrapped in React.memo", ({ expectCallstack }) => {
-  expectCallstack(
-    `
+test("tsx: diffs a component wrapped in React.memo", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       export default memo(function OrderRow({ order }) {
         const total = formatCurrency(order.total);
         if (order.isPending) {
@@ -178,10 +227,17 @@ test("tsx: diffs a component wrapped in React.memo", ({ expectCallstack }) => {
     +   trackImpression(order.id);
         return <Row total={total} />;
       });
-    `,
-    "OrderRow",
-    { file: "OrderRow.tsx" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/OrderRow.tsx": before });
+  const to = host.commit("after", { "/OrderRow.tsx": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e OrderRow`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       OrderRow({})
       ├─ formatCurrency()
       ├─ if (order.isPending)
@@ -189,84 +245,74 @@ test("tsx: diffs a component wrapped in React.memo", ({ expectCallstack }) => {
     +    └─ SkeletonRow()
     + ├─ trackImpression()
       └─ Row()
-  `);
+  `));
 });
 
-vitestTest("tsx: composed wrappers are unwrapped to the inner function", () => {
-  const functions = extractFunctions(
-    "components/Input.tsx",
-    `export default memo(forwardRef(function Input(props, ref) { focusOnMount(ref) }))`,
-  );
+test("tsx: composed wrappers are unwrapped to the inner function", () => {
+  const host = workspace({
+    "/components/Input.tsx": src`
+      export default memo(forwardRef(function Input(props, ref) { focusOnMount(ref) }))
+    `,
+  });
 
-  expect(functions.map((fn) => [fn.key, fn.exported])).toEqual([
-    ["Input", true],
-  ]);
-  expect(functions[0]?.steps.map((s) => s.type === "call" && s.key)).toEqual([
-    "focusOnMount",
-  ]);
+  const result = host.run("calldiff tree -e Input");
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toEqual(src`
+    Input(props, ref)
+    └─ focusOnMount()
+  `.trimEnd());
 });
 
-vitestTest("tsx: a wrapper over a bare reference adds nothing", () => {
-  // `memo(RowBase)` is an alias — RowBase is extracted at its own definition,
-  // so there is no second function to record here.
-  const functions = extractFunctions(
-    "components/Row.tsx",
-    `function RowBase({ item }) { renderCell(item) }
-     export const Row = memo(RowBase)`,
-  );
+test("tsx: a wrapper over a bare reference adds nothing", () => {
+  const host = workspace({
+    "/components/Row.tsx": src`
+      function RowBase({ item }) { renderCell(item) }
+      export const Row = memo(RowBase)
+    `,
+  });
 
-  expect(functions.map((fn) => fn.key)).toEqual(["RowBase"]);
+  const alias = host.run("calldiff tree -e Row");
+  expect(alias.code).not.toBe(0);
+  expect(`${alias.stdout}\n${alias.stderr}`).toMatch(/Entrypoint not found/);
+
+  const base = host.run("calldiff tree -e RowBase");
+  expect(base.code).toBe(0);
+  expect(cliBody(base.stdout)).toContain("renderCell()");
 });
 
-vitestTest("tsx: an anonymous memo callback keys off the declared name", () => {
-  const functions = extractFunctions(
-    "components/OrderBadge.tsx",
-    `export const OrderBadge = memo(({ status }) => {
-       return <Badge tone={toneFor(status)} />
-     })`,
-  );
+test("tsx: an anonymous memo callback keys off the declared name", () => {
+  const host = workspace({
+    "/components/OrderBadge.tsx": src`
+      export const OrderBadge = memo(({ status }) => {
+        return <Badge tone={toneFor(status)} />
+      })
+    `,
+  });
 
-  expect(functions.map((fn) => fn.key)).toEqual(["OrderBadge"]);
+  const result = host.run("calldiff tree -e OrderBadge");
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toContain("OrderBadge(");
+  expect(cliBody(result.stdout)).toContain("Badge()");
 });
 
-vitestTest("an exported wrapped declarator is selectable as an entry", () => {
-  const index = buildIndex(
-    extractFunctions(
-      "server/api/orders/index.post.ts",
-      "export const handler = defineEventHandler(async (event) => { chargeCard() })",
-    ),
-  );
+test("an exported wrapped declarator is selectable as an entry", () => {
+  const host = workspace({
+    "/server/api/orders/index.post.ts": src`
+      export const handler = defineEventHandler(async (event) => { chargeCard() })
+    `,
+  });
 
-  expect(index.get("handler")?.exported).toBe(true);
+  const result = host.run("calldiff tree -e handler");
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toEqual(src`
+    handler(event)
+    └─ chargeCard()
+  `.trimEnd());
 });
 
-vitestTest("wrapped helpers inside a body are extracted as local", () => {
-  const functions = extractFunctions(
-    "src/boot.ts",
-    `export function boot() {
-       const handler = defineEventHandler(async (event) => { chargeCard(event) })
-       handler()
-     }`,
-  );
-
-  expect(
-    functions.map((fn) => [fn.key, fn.local ?? false, fn.exported]),
-  ).toEqual([
-    ["boot", false, true],
-    ["handler", true, false],
-  ]);
-  expect(
-    functions
-      .find((fn) => fn.key === "handler")
-      ?.steps.map((s) => s.type === "call" && s.key),
-  ).toEqual(["chargeCard"]);
-});
-
-test("typescript: a wrapped local helper expands from the caller", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("typescript: a wrapped local helper expands from the caller", () => {
+  const { before, after } = sourcesFromFileDiff(
+    diffOutdent(`
       export function boot() {
         const handler = defineEventHandler(async (event) => {
     -     chargeCard(event);
@@ -274,14 +320,21 @@ test("typescript: a wrapped local helper expands from the caller", ({
         });
         handler();
       }
-    `,
-    "boot",
-    { file: "boot.ts" },
-  ).toEqual(`
+    `),
+  );
+
+  const host = workspace();
+  const from = host.commit("before", { "/boot.ts": before });
+  const to = host.commit("after", { "/boot.ts": after });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e boot`);
+
+  expect(result.code).toBe(0);
+  expect(cliBody(result.stdout)).toBe(diffOutdent(`
       boot()
       ├─ defineEventHandler()
       └─ handler(event)
     -    ├─ chargeCard()
     +    └─ refund()
-  `);
+  `));
 });
