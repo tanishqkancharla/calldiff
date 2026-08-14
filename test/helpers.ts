@@ -2,6 +2,20 @@ import { buildCallTree } from "../src/calltree.js";
 import { diffTrees } from "../src/diff.js";
 import { buildIndex, extractFunctions } from "../src/extract.js";
 import { renderDiff, renderTree } from "../src/render.js";
+import type { CallStep, FunctionInfo } from "../src/types.js";
+
+/**
+ * A function's steps as indented keys, one per line, so nesting is visible in
+ * an assertion: a call's arguments and callback bodies hang under it.
+ */
+export function stepShape(fn: FunctionInfo | undefined): string {
+  const walk = (steps: CallStep[], depth: number): string[] =>
+    steps.flatMap((step) => [
+      `${"  ".repeat(depth)}${step.type === "call" ? step.key : step.label}`,
+      ...walk(step.children ?? [], depth + 1),
+    ]);
+  return walk(fn?.steps ?? [], 0).join("\n");
+}
 
 export type CallstackDiffOptions = {
   maxDepth?: number;

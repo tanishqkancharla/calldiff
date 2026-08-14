@@ -334,21 +334,40 @@ function collectStatements(
       return;
     }
 
-    if (type === "call_expression") {
+    if (type === "call_expression" || type === "new_expression") {
+      const isNew = type === "new_expression";
       const callee = node.namedChild(0);
-      if (callee) {
-        const key = calleeKey(callee, className);
+      const bare = callee ? calleeKey(callee, isNew ? null : className) : null;
+      const key =
+        bare && isNew && !bare.startsWith("new ") ? `new ${bare}` : bare;
+      const args = childByType(node, "arguments");
+      const hoisted = hoistsCallback(node);
+      const nested =
+        args && !hoisted ? stepsFromArguments(file, args, className) : [];
+
+      if (key && nested.length > 0) {
+        steps.push({
+          type: "call",
+          key,
+          ...locFromNode(file, node),
+          children: nested,
+        });
+      } else {
         if (key) addCall(key, node);
+        for (const step of nested) steps.push(step);
       }
-    } else if (type === "new_expression") {
-      const callee = node.namedChild(0);
-      if (callee) {
-        const key = calleeKey(callee, null);
-        if (key) {
-          addCall(key.startsWith("new ") ? key : `new ${key}`, node);
-        }
+
+      // A hoisted wrapper's arguments still contribute their own calls as
+      // siblings — only the callback is left to the definition it becomes.
+      if (args && hoisted) {
+        for (const child of namedChildren(args)) walkExpr(child);
       }
-    } else if (type === "jsx_element") {
+      // `foo(x).bar()` keeps `foo` — the receiver side is not an argument.
+      if (callee) walkExpr(callee);
+      return;
+    }
+
+    if (type === "jsx_element") {
       const opening = childByType(node, "jsx_opening_element");
       const childNodes = namedChildren(node).filter(
         (c) =>
@@ -420,6 +439,65 @@ function collectStatements(
   }
 
   return steps;
+}
+
+/**
+ * Steps written inside a call's parentheses, in argument order: the calls a
+ * plain argument makes, and the BODY of a function argument.
+ *
+ * They become children of the call rather than steps of the enclosing
+ * function, which is what contract #5 protects — `items.map(cb)` runs `cb`,
+ * the function around it does not. Kotlin already reads a trailing lambda this
+ * way, and the JSX branch already nests a component's children; this is the
+ * same shape for `.then`, `useEffect` and `describe`/`it`.
+ */
+function stepsFromArguments(
+  file: string,
+  args: SyntaxNode,
+  className: string | null,
+): CallStep[] {
+  const steps: CallStep[] = [];
+  for (const rawArg of namedChildren(args)) {
+    const arg = stripParens(rawArg);
+    if (isFnLike(arg.type) && arg.type !== "method_definition") {
+      steps.push(
+        ...collectStepsFromBody(
+          file,
+          unwrapCurriedBody(bodyOf(arg)),
+          className,
+        ),
+      );
+      continue;
+    }
+    steps.push(...collectStatements(file, [arg], className));
+  }
+  return steps;
+}
+
+/**
+ * Whether this call's function argument is hoisted into a definition of its
+ * own: `const handler = defineEventHandler(cb)`, `export default memo(fn)`.
+ * The callback is registered under the declared name and expanded from its
+ * call site, so nesting the body here as well would print it twice.
+ */
+function hoistsCallback(call: SyntaxNode): boolean {
+  let current: SyntaxNode | null = call.parent;
+  while (current && current.type === "parenthesized_expression") {
+    current = current.parent;
+  }
+  if (!current) return false;
+  if (
+    current.type === "variable_declarator" ||
+    current.type === "export_statement"
+  ) {
+    return true;
+  }
+  // Wrappers compose: `export default memo(forwardRef(fn))` claims `fn` too.
+  if (current.type === "arguments") {
+    const outer = current.parent;
+    return outer?.type === "call_expression" ? hoistsCallback(outer) : false;
+  }
+  return false;
 }
 
 function collectStepsFromBody(

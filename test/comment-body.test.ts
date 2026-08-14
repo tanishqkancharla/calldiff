@@ -1,6 +1,7 @@
 import { expect, test as vitestTest } from "vitest";
 import { extractFunctions } from "../src/extract.js";
 import type { FunctionInfo } from "../src/types.js";
+import { stepShape } from "./helpers.js";
 
 /** Call keys of a function's steps, in order (branches drop out as `false`). */
 function callKeys(fn: FunctionInfo | undefined): unknown[] {
@@ -41,7 +42,9 @@ vitestTest("typescript: a comment inside a curried chain is not the body", () =>
          Effect.flatMap(currentRequest(), (request) => runTraced(request, effect))`,
   );
 
-  expect(callKeys(traceRequest)).toEqual(["Effect.flatMap", "currentRequest"]);
+  expect(stepShape(traceRequest)).toBe(
+    ["Effect.flatMap", "  currentRequest", "  runTraced"].join("\n"),
+  );
 });
 
 vitestTest("javascript: a line comment is not the arrow's body", () => {

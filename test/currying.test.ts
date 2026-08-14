@@ -2,6 +2,7 @@ import { expect, test as vitestTest } from "vitest";
 import { extractFunctions } from "../src/extract.js";
 import type { FunctionInfo } from "../src/types.js";
 import { test } from "./expectCallstack.js";
+import { stepShape } from "./helpers.js";
 
 /** Call keys of a function's steps, in order (branches drop out as `false`). */
 function callKeys(fn: FunctionInfo | undefined): unknown[] {
@@ -17,7 +18,7 @@ vitestTest("typescript: a curried arrow chain keeps the outer name's steps", () 
 
   // The chain is one logical function: the inner arrow is not its own entry.
   expect(functions.map((fn) => fn.key)).toEqual(["traceRequest"]);
-  expect(callKeys(functions[0])).toEqual(["withTracer", "makeTracer"]);
+  expect(stepShape(functions[0])).toBe(["withTracer", "  makeTracer"].join("\n"));
 });
 
 vitestTest("typescript: every arrow in the chain is peeled, not just one", () => {
@@ -42,8 +43,10 @@ vitestTest("typescript: generics and return annotations do not hide the body", (
          Effect.flatMap(currentRequest(), (request) => runTraced(request, effect))`,
   );
 
-  // `runTraced` sits inside an argument callback, so contract #5 keeps it out.
-  expect(callKeys(traceRequest)).toEqual(["Effect.flatMap", "currentRequest"]);
+  // The argument call and the callback body both hang under the call.
+  expect(stepShape(traceRequest)).toBe(
+    ["Effect.flatMap", "  currentRequest", "  runTraced"].join("\n"),
+  );
 });
 
 vitestTest("typescript: a curried class property is peeled too", () => {
