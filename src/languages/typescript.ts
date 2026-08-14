@@ -310,6 +310,63 @@ function collectStatements(
   return steps;
 }
 
+/**
+ * The body a function node runs: its statement block, or the single expression
+ * of a concise arrow. Everything else a function node holds — parameters, type
+ * parameters, the return annotation, modifiers, its own name — is skipped.
+ *
+ * `comment` is skipped for the same reason, and it is the subtle one:
+ * tree-sitter reports comments as NAMED children, so `(event) => // why\n
+ * process(event)` puts one exactly where the body is looked for, and taking it
+ * leaves the function with no calls at all.
+ */
+function bodyOf(node: SyntaxNode): SyntaxNode | null {
+  return (
+    childByType(node, "statement_block") ??
+    namedChildren(node).find(
+      (c) =>
+        c.type !== "comment" &&
+        c.type !== "formal_parameters" &&
+        c.type !== "type_parameters" &&
+        c.type !== "type_annotation" &&
+        c.type !== "identifier" &&
+        c.type !== "accessibility_modifier" &&
+        c.type !== "async" &&
+        c.type !== "readonly",
+    ) ??
+    null
+  );
+}
+
+/**
+ * Peel a curried declaration down to the body that holds its calls.
+ *
+ * `const f = (a) => (b) => leaf()` is one logical function whose arguments are
+ * split across arrows: the outer arrow's body IS the next arrow, so stopping
+ * at it (contract #5 — a nested lambda is not the outer caller's) leaves the
+ * declaration with no steps at all. Every call site writes `f(a)(b)`, so the
+ * steps belong to the name they are reached through. Effect combinators,
+ * Redux-style middleware and React HOCs are all this shape.
+ *
+ * Only a body that IS a function is peeled. One RETURNED among other
+ * statements (`function make() { setup(); return () => tick() }`) is a factory
+ * whose product runs later, at a call site of its own, so it stays out.
+ */
+function unwrapCurriedBody(body: SyntaxNode | null): SyntaxNode | null {
+  let current = body ? stripTypeWrappers(body) : null;
+  while (
+    current &&
+    (current.type === "arrow_function" ||
+      current.type === "function_expression" ||
+      current.type === "generator_function")
+  ) {
+    const inner = bodyOf(current);
+    if (!inner) return current;
+    current = stripTypeWrappers(inner);
+  }
+  return current;
+}
+
 function collectStepsFromBody(
   file: string,
   body: SyntaxNode | null,
@@ -562,19 +619,7 @@ function handleFunctionNode(
   if (!name) return;
   const key = className && !local ? `${className}.${name}` : name;
   const params = childByType(node, "formal_parameters");
-  const body =
-    childByType(node, "statement_block") ??
-    namedChildren(node).find(
-      (c) =>
-        c.type !== "formal_parameters" &&
-        c.type !== "type_parameters" &&
-        c.type !== "type_annotation" &&
-        c.type !== "identifier" &&
-        c.type !== "accessibility_modifier" &&
-        c.type !== "async" &&
-        c.type !== "readonly",
-    ) ??
-    null;
+  const body = unwrapCurriedBody(bodyOf(node));
 
   const info = functionFromParts(
     file,

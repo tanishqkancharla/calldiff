@@ -466,11 +466,17 @@ function paramsOf(node: SyntaxNode): SyntaxNode | null {
   );
 }
 
+/**
+ * `comment` is skipped because tree-sitter reports comments as NAMED children,
+ * so `(event) => // why\n process(event)` puts one exactly where the body is
+ * looked for, and taking it leaves the function with no calls at all.
+ */
 function bodyOf(node: SyntaxNode): SyntaxNode | null {
   return (
     childByType(node, "statement_block") ??
     namedChildren(node).find(
       (c) =>
+        c.type !== "comment" &&
         c.type !== "formal_parameters" &&
         c.type !== "identifier" &&
         c.type !== "property_identifier" &&
@@ -479,6 +485,46 @@ function bodyOf(node: SyntaxNode): SyntaxNode | null {
     ) ??
     null
   );
+}
+
+/** Peel `(fn)` so the node underneath can be matched on its own terms. */
+function stripParens(node: SyntaxNode): SyntaxNode {
+  let current = node;
+  while (current.type === "parenthesized_expression") {
+    const inner = current.namedChild(0);
+    if (!inner) return current;
+    current = inner;
+  }
+  return current;
+}
+
+/**
+ * Peel a curried declaration down to the body that holds its calls.
+ *
+ * `const f = (a) => (b) => leaf()` is one logical function whose arguments are
+ * split across arrows: the outer arrow's body IS the next arrow, so stopping
+ * at it (contract #5 — a nested lambda is not the outer caller's) leaves the
+ * declaration with no steps at all. Every call site writes `f(a)(b)`, so the
+ * steps belong to the name they are reached through. Redux-style middleware
+ * and React HOCs are both this shape.
+ *
+ * Only a body that IS a function is peeled. One RETURNED among other
+ * statements (`function make() { setup(); return () => tick() }`) is a factory
+ * whose product runs later, at a call site of its own, so it stays out.
+ */
+function unwrapCurriedBody(body: SyntaxNode | null): SyntaxNode | null {
+  let current = body ? stripParens(body) : null;
+  while (
+    current &&
+    (current.type === "arrow_function" ||
+      current.type === "function_expression" ||
+      current.type === "generator_function")
+  ) {
+    const inner = bodyOf(current);
+    if (!inner) return current;
+    current = stripParens(inner);
+  }
+  return current;
 }
 
 /**
@@ -567,7 +613,7 @@ function handleFunctionNode(
 ) {
   if (!name) return;
   const key = className && !local ? `${className}.${name}` : name;
-  const body = bodyOf(node);
+  const body = unwrapCurriedBody(bodyOf(node));
   const info = functionFromParts(
     file,
     key,
