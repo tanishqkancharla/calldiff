@@ -89,6 +89,16 @@ function collectIf(
   const kind = asElseIf ? "else-if" : "if";
   const labelKind = asElseIf ? "else if" : "if";
 
+  // Everything before the block runs unconditionally: the condition, and the
+  // init statement in `if v, err := doThing(); err != nil`. Only the condition
+  // reaches the label, so without this both are calls no `reach` query can find.
+  // See CONTRACT.md "Must support" #4.
+  for (const pre of before) {
+    for (const step of collectStatements(file, [pre], receiverType)) {
+      steps.push(step);
+    }
+  }
+
   steps.push({
     type: "branch",
     key: condText ? `${kind}:${condText}` : kind,
@@ -166,6 +176,12 @@ function collectStatements(
             c.type !== "default_case",
         ) ?? null;
       const subjectText = subject ? collapseWs(subject.text) : "";
+      // The subject runs before any arm. See CONTRACT.md "Must support" #4.
+      if (subject) {
+        for (const step of collectStatements(file, [subject], receiverType)) {
+          steps.push(step);
+        }
+      }
       for (const clause of kids) {
         if (clause.type === "expression_case" || clause.type === "type_case") {
           const expr =

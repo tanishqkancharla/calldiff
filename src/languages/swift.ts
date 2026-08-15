@@ -105,6 +105,13 @@ function collectStatements(
     const kind = asElseIf ? "else-if" : "if";
     const labelKind = asElseIf ? "else if" : "if";
 
+    // See CONTRACT.md "Must support" #4.
+    if (cond) {
+      for (const step of collectStatements(file, [cond], className)) {
+        steps.push(step);
+      }
+    }
+
     steps.push({
       type: "branch",
       key: condText ? `${kind}:${condText}` : kind,
@@ -181,6 +188,14 @@ function collectStatements(
     }
 
     if (node.type === "switch_statement") {
+      // The subject runs before any arm. See CONTRACT.md "Must support" #4.
+      const subject =
+        namedChildren(node).find((c) => c.type !== "switch_entry") ?? null;
+      if (subject) {
+        for (const step of collectStatements(file, [subject], className)) {
+          steps.push(step);
+        }
+      }
       for (const entry of namedChildren(node)) {
         if (entry.type !== "switch_entry") continue;
         const pattern = childByType(entry, "switch_pattern");

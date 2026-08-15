@@ -38,6 +38,7 @@ test("rust: refactors calls into a helper with if/else", ({
     + │  ├─ auth_storage_create()
     + │  └─ create_coding_tools()
     + ├─ services.boot()
+      ├─ is_empty()
       ├─ if options.session_id.is_empty()
          └─ session_manager_create()
       └─ else

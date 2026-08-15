@@ -34,6 +34,10 @@ export function pathToTree(nodes: CallNode[]): CallNode {
     ...(head!.file ? { file: head!.file } : {}),
     ...(head!.line != null ? { line: head!.line } : {}),
     ...(head!.endLine != null ? { endLine: head!.endLine } : {}),
+    ...(head!.resolved != null ? { resolved: head!.resolved } : {}),
+    ...(head!.declaredIn ? { declaredIn: head!.declaredIn } : {}),
+    ...(head!.truncated ? { truncated: head!.truncated } : {}),
+    ...(head!.recursive ? { recursive: head!.recursive } : {}),
     children: rest.length > 0 ? [pathToTree(rest)] : [],
   };
 }

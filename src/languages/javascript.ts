@@ -154,6 +154,14 @@ function collectStatements(
     steps.push({ type: "call", key, ...locFromNode(file, node) });
   };
 
+  /** Branch tests are walked for calls too — see CONTRACT.md "Must support" #4. */
+  const addTestCalls = (test: SyntaxNode | null) => {
+    if (!test) return;
+    for (const step of collectStatements(file, [test], className)) {
+      steps.push(step);
+    }
+  };
+
   const walkExpr = (node: SyntaxNode): void => {
     const type = node.type;
 
@@ -175,6 +183,7 @@ function collectStatements(
       const elseClause = childByType(node, "else_clause");
       const cond = test ? condText(test) : "";
 
+      addTestCalls(test);
       steps.push({
         type: "branch",
         key: branchKey("if", cond),
@@ -201,6 +210,7 @@ function collectStatements(
                 c.type !== "else_clause",
             ) ?? null;
           const elseCond = elseTest ? condText(elseTest) : "";
+          addTestCalls(elseTest);
           steps.push({
             type: "branch",
             key: branchKey("else-if", elseCond),
@@ -272,6 +282,9 @@ function collectStatements(
     }
 
     if (type === "switch_statement") {
+      // The subject runs before any arm — `switch (getKind(x))` calls
+      // `getKind`. See CONTRACT.md "Must support" #4.
+      addTestCalls(childByType(node, "parenthesized_expression"));
       const body = childByType(node, "switch_body");
       for (const clause of body ? namedChildren(body) : []) {
         if (clause.type === "switch_case") {

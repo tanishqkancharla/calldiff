@@ -75,6 +75,12 @@ function collectStatements(file: string, statements: SyntaxNode[]): CallStep[] {
     steps.push({ type: "call", key, ...locFromNode(file, node) });
   };
 
+  /** Branch tests are walked for calls too — see CONTRACT.md "Must support" #4. */
+  const addTestCalls = (test: SyntaxNode | null) => {
+    if (!test) return;
+    for (const step of collectStatements(file, [test])) steps.push(step);
+  };
+
   const walk = (node: SyntaxNode): void => {
     // Nested function bodies are not attributed to the outer function
     if (node.type === "function_definition") return;
@@ -115,6 +121,7 @@ function collectStatements(file: string, statements: SyntaxNode[]): CallStep[] {
       // If first kid is the condition already captured as test, drop it from consequent
       const thenStmts = consequent.filter((c) => c !== cond);
 
+      addTestCalls(test);
       steps.push({
         type: "branch",
         key: condText ? `if:${condText}` : "if",
@@ -129,6 +136,7 @@ function collectStatements(file: string, statements: SyntaxNode[]): CallStep[] {
           childByType(clause, "test_command") ?? elifKids[0] ?? null;
         const text = elifTest ? collapseWs(elifTest.text) : "";
         const body = elifKids.filter((c) => c !== elifTest);
+        addTestCalls(elifTest);
         steps.push({
           type: "branch",
           key: text ? `else-if:${text}` : "else-if",
@@ -151,6 +159,10 @@ function collectStatements(file: string, statements: SyntaxNode[]): CallStep[] {
     }
 
     if (node.type === "case_statement") {
+      // The subject runs before any arm. See CONTRACT.md "Must support" #4.
+      addTestCalls(
+        namedChildren(node).find((c) => c.type !== "case_item") ?? null,
+      );
       for (const item of namedChildren(node)) {
         if (item.type !== "case_item") continue;
         const kids = namedChildren(item);

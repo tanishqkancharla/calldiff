@@ -99,6 +99,13 @@ function collectStatements(
         ) ?? null;
       const elseClause = childByType(node, "else_clause");
       const condText = cond ? collapseWs(cond.text) : "";
+      // See CONTRACT.md "Must support" #4. The nested `else if` chain below
+      // re-collects through collectStatements, so its test calls come with it.
+      if (cond) {
+        for (const step of collectStatements(file, [cond], typeName)) {
+          steps.push(step);
+        }
+      }
       steps.push({
         type: "branch",
         key: condText ? `if:${condText}` : "if",
@@ -177,6 +184,14 @@ function collectStatements(
     }
 
     if (node.type === "switch_expression") {
+      // The subject runs before any arm. See CONTRACT.md "Must support" #4.
+      const subject =
+        namedChildren(node).find((c) => c.type !== "switch_case") ?? null;
+      if (subject) {
+        for (const step of collectStatements(file, [subject], typeName)) {
+          steps.push(step);
+        }
+      }
       for (const clause of namedChildren(node)) {
         if (clause.type !== "switch_case") continue;
         const kids = namedChildren(clause);

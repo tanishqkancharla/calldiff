@@ -21,7 +21,13 @@ Helpers: `namedChildren`, `childByType`, `collapseWs` from `./types.js`.
 1. Free functions + type/class methods
 2. Calls: bare + member/receiver (`self`/`this`/recv → `Type.method`)
 3. Constructors / `new` analogue when the language has one
-4. if/else (and elif if present) as branches with source-text labels
+4. if/else (and elif if present) as branches with source-text labels. The test
+   expression is *also* walked for calls, emitted as steps immediately before
+   its branch: `if (guard(x))` really calls `guard`, and a label is not an edge.
+   Skipping this makes `tree` print a call that `reach` reports no path to.
+   Loops (`while (guard(x))`) already get this by taking the ordinary path.
+   Same for a switch/match subject — `switch (getKind(x))` calls `getKind`
+   before any arm is chosen, so walk it once, before the case branches.
 5. Nested function/lambda bodies NOT attributed to outer caller
 6. Ignore computed/dynamic callees when obvious
 

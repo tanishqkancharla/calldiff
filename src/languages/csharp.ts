@@ -83,6 +83,14 @@ function collectStatements(
     steps.push({ type: "call", key, ...locFromNode(file, node) });
   };
 
+  /** Branch tests are walked for calls too — see CONTRACT.md "Must support" #4. */
+  const addTestCalls = (test: SyntaxNode | null) => {
+    if (!test) return;
+    for (const step of collectStatements(file, [test], className)) {
+      steps.push(step);
+    }
+  };
+
   const walk = (node: SyntaxNode): void => {
     if (
       node.type === "method_declaration" ||
@@ -105,6 +113,7 @@ function collectStatements(
         namedChildren(node).find((c, i) => i > 0) ??
         null;
       const text = condText(cond);
+      addTestCalls(cond);
       steps.push({
         type: "branch",
         key: text ? `if:${text}` : "if",
@@ -131,6 +140,7 @@ function collectStatements(
           const elifText = condText(elifCond);
           const elifCons =
             alternative.childForFieldName("consequence") ?? null;
+          addTestCalls(elifCond);
           steps.push({
             type: "branch",
             key: elifText ? `else-if:${elifText}` : "else-if",
@@ -213,6 +223,12 @@ function collectStatements(
     }
 
     if (node.type === "switch_statement") {
+      // The subject runs before any arm. See CONTRACT.md "Must support" #4.
+      addTestCalls(
+        node.childForFieldName("value") ??
+          namedChildren(node).find((c) => c.type !== "switch_body") ??
+          null,
+      );
       const body =
         node.childForFieldName("body") ?? childByType(node, "switch_body");
       if (body) {

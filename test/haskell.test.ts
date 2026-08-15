@@ -35,6 +35,8 @@ sessionId _ = Nothing
     + ├─ getServices()
     + │  ├─ authStorageCreate()
     + │  └─ createCodingTools()
+      ├─ null()
+      ├─ sessionId(_)
       ├─ if null (sessionId options)
          └─ sessionManagerCreate()
       └─ else

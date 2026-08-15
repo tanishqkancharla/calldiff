@@ -143,6 +143,16 @@ function collectExpr(
           children: tryBody ? collectExpr(file, tryBody, moduleName) : [],
         });
       }
+      if (n.type === "match_expression") {
+        // The scrutinee runs before any arm. See CONTRACT.md "Must support" #4.
+        const subject =
+          namedChildren(n).find((c) => c.type !== "match_case") ?? null;
+        if (subject) {
+          for (const step of collectExpr(file, subject, moduleName)) {
+            steps.push(step);
+          }
+        }
+      }
       for (const clause of namedChildren(n)) {
         if (clause.type !== "match_case") continue;
         const kids = namedChildren(clause);
@@ -170,6 +180,11 @@ function collectExpr(
           (c) => c.type !== "then_clause" && c.type !== "else_clause",
         ) ?? null;
       const condText = cond ? collapseWs(cond.text) : "";
+      // See CONTRACT.md "Must support" #4. The nested `else if` chain below
+      // re-collects through collectExpr, so its test calls come back with it.
+      if (cond) {
+        for (const step of collectExpr(file, cond, moduleName)) steps.push(step);
+      }
       steps.push({
         type: "branch",
         key: condText ? `if:${condText}` : "if",

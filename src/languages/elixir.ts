@@ -158,6 +158,9 @@ function collectStatements(
           ? namedChildren(doBlock).filter((c) => c.type !== "else_block")
           : [];
         const elseBlock = doBlock ? childByType(doBlock, "else_block") : null;
+        // The condition runs before either arm, so its calls are emitted first.
+        // See CONTRACT.md "Must support" #4.
+        if (cond) walk(cond);
         steps.push({
           type: "branch",
           key: condText ? `if:${condText}` : "if",
@@ -174,8 +177,6 @@ function collectStatements(
             children: collectBody(file, elseBlock, moduleName),
           });
         }
-        // cond may contain calls — walk it
-        if (cond) walk(cond);
         return;
       }
       if (head && head.text === "case") {

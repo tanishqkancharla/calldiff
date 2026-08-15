@@ -119,6 +119,14 @@ function collectStatements(
     steps.push({ type: "call", key, ...locFromNode(file, node) });
   };
 
+  /** Branch tests are walked for calls too — see CONTRACT.md "Must support" #4. */
+  const addTestCalls = (test: SyntaxNode | null) => {
+    if (!test) return;
+    for (const step of collectStatements(file, [test], className)) {
+      steps.push(step);
+    }
+  };
+
   const walk = (node: SyntaxNode): void => {
     // Nested defs / lambdas: do not attribute their bodies to the outer fn
     if (
@@ -139,6 +147,7 @@ function collectStatements(
             c.type !== "elif_clause",
         ) ?? null;
       const cond = condNode ? collapseWs(condNode.text) : "";
+      addTestCalls(condNode);
       steps.push({
         type: "branch",
         key: cond ? `if:${cond}` : "if",
@@ -152,6 +161,7 @@ function collectStatements(
           const elifCond =
             namedChildren(clause).find((c) => c.type !== "block") ?? null;
           const text = elifCond ? collapseWs(elifCond.text) : "";
+          addTestCalls(elifCond);
           steps.push({
             type: "branch",
             key: text ? `else-if:${text}` : "else-if",
@@ -177,6 +187,9 @@ function collectStatements(
       const subject =
         namedChildren(node).find((c) => c.type !== "block") ?? null;
       const subjectText = subject ? collapseWs(subject.text) : "";
+      // The subject runs before any arm — `match get_kind(x):` calls
+      // `get_kind`. See CONTRACT.md "Must support" #4.
+      addTestCalls(subject);
       const block = childByType(node, "block");
       for (const clause of block ? namedChildren(block) : []) {
         if (clause.type !== "case_clause") continue;

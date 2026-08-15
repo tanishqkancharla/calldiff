@@ -23,6 +23,22 @@ export interface CallNode {
   file?: string;
   line?: number;
   endLine?: number;
+  /**
+   * Did this call resolve to a definition in the indexed tree?
+   *
+   * Present on call nodes, absent on branches, which are not calls. Without it
+   * a childless leaf is three different facts in one shape: an unresolved
+   * callee (builtin, external package, dynamic), a resolved definition whose
+   * body was cut off by `--max-depth`, and a resolved definition that makes no
+   * calls. The resolver knows which; only the ASCII reader can afford not to.
+   */
+  resolved?: boolean;
+  /** Where that definition is declared. Present iff `resolved`. */
+  declaredIn?: SourceLoc;
+  /** Children omitted because `--max-depth` was reached, not because there are none. */
+  truncated?: true;
+  /** Re-entry into a definition already on the stack (rendered as a `⇄` suffix). */
+  recursive?: true;
   children: CallNode[];
 }
 
