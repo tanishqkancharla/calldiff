@@ -53,9 +53,23 @@ function writeStubPackageJson(dir: string): void {
 }
 
 /**
- * Install one grammar into its own prefix via a unique staging dir, then
- * rename into place. Different packages never share a node_modules; two
- * processes installing the same package race on rename, not on npm extract.
+ * Install one grammar into `packages/<name>/` via a unique staging dir, then
+ * rename into place.
+ *
+ * The race: several `calldiff` processes share one cache dir. On first use of
+ * Swift vs Kotlin they both ran `npm install --prefix <cache> <pkg>` into the
+ * **same** `node_modules`. npm extracts tarballs by mkdir/rename in that tree
+ * (and into a shared `node_modules/.staging`). Two extracts hitting the same
+ * path throw ENOTEMPTY — even when the packages are different, because they
+ * also unpack common deps (`node-gyp-build`, `tree-sitter`, …) into one folder.
+ *
+ * A mutex around the whole cache serialized unrelated installs. A different
+ * package manager does not help: `pnpm add` into one project still mutates one
+ * `node_modules`. The published CLI also cannot assume pnpm is on PATH.
+ *
+ * Isolation: each package is its own npm `--prefix`. Extracts never share a
+ * tree. Two processes installing the *same* package still both extract, then
+ * race on `rename(staging → dest)` — first wins, loser drops staging.
  */
 function installIsolated(cacheDir: string, npmPackage: string): void {
   const dest = isolatedPrefix(cacheDir, npmPackage);
