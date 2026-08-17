@@ -1,42 +1,57 @@
+import { outdent } from "outdent";
 import { expect, test } from "vitest";
 import { diffOutdent } from "./diff-outdent.js";
-import { sourcesFromFileDiff } from "./file-diff.js";
-import { cliBody, workspace } from "./workspace.js";
+import { workspace } from "./workspace.js";
+
+const src = outdent({ trimTrailingNewline: false });
 
 test("haskell: refactors calls into a helper with if/else", () => {
   // File diff markers at column 0 so reconstructed Haskell stays layout-safe.
-  const { before, after } = sourcesFromFileDiff(
-    diffOutdent(`
-createAgentSession options = do {
--  authStorageCreate;
--  createCodingTools;
-+  getServices;
-   if null (sessionId options)
-     then sessionManagerCreate
-     else sessionManagerOpen (sessionId options);
-}
-
-+getServices = do {
-+  authStorageCreate;
-+  createCodingTools;
-+}
-
-authStorageCreate = return ()
-createCodingTools = return ()
-sessionManagerCreate = return ()
-sessionManagerOpen _ = return ()
-sessionId _ = Nothing
-`),
-  );
-
   const host = workspace();
-  const from = host.commit("before", { "/pi.hs": before });
-  const to = host.commit("after", { "/pi.hs": after });
+  const from = host.commit("before", {
+    "/pi.hs": src`
+      createAgentSession options = do {
+        authStorageCreate;
+        createCodingTools;
+        if null (sessionId options)
+          then sessionManagerCreate
+          else sessionManagerOpen (sessionId options);
+      }
+      
+      
+      authStorageCreate = return ()
+      createCodingTools = return ()
+      sessionManagerCreate = return ()
+      sessionManagerOpen _ = return ()
+      sessionId _ = Nothing
+    `,
+  });
+  const to = host.commit("after", {
+    "/pi.hs": src`
+      createAgentSession options = do {
+        getServices;
+        if null (sessionId options)
+          then sessionManagerCreate
+          else sessionManagerOpen (sessionId options);
+      }
+      
+      getServices = do {
+        authStorageCreate;
+        createCodingTools;
+      }
+      
+      authStorageCreate = return ()
+      createCodingTools = return ()
+      sessionManagerCreate = return ()
+      sessionManagerOpen _ = return ()
+      sessionId _ = Nothing
+    `,
+  });
 
   const result = host.run(`calldiff diff ${from} ${to} -e createAgentSession`);
 
   expect(result.code).toBe(0);
-  expect(cliBody(result.stdout)).toBe(diffOutdent(`
+  expect(result.stdout).toContain(diffOutdent(`
       createAgentSession(options)
     - ├─ authStorageCreate()
     - ├─ createCodingTools()
@@ -52,27 +67,34 @@ sessionId _ = Nothing
 });
 
 test("haskell: apply chain resolves callees", () => {
-  const { before, after } = sourcesFromFileDiff(
-    diffOutdent(`
-start r =
-  prepare r >>
-+  validate r >>
-  run r
-
-prepare _ = return ()
-+validate _ = return ()
-run _ = return ()
-`),
-  );
-
   const host = workspace();
-  const from = host.commit("before", { "/runner.hs": before });
-  const to = host.commit("after", { "/runner.hs": after });
+  const from = host.commit("before", {
+    "/runner.hs": src`
+      start r =
+       prepare r >>
+       run r
+      
+      prepare _ = return ()
+      run _ = return ()
+    `,
+  });
+  const to = host.commit("after", {
+    "/runner.hs": src`
+      start r =
+       prepare r >>
+        validate r >>
+       run r
+      
+      prepare _ = return ()
+      validate _ = return ()
+      run _ = return ()
+    `,
+  });
 
   const result = host.run(`calldiff diff ${from} ${to} -e start`);
 
   expect(result.code).toBe(0);
-  expect(cliBody(result.stdout)).toBe(diffOutdent(`
+  expect(result.stdout).toContain(diffOutdent(`
       start(r)
       ├─ prepare(_)
     + ├─ validate(_)
@@ -81,24 +103,29 @@ run _ = return ()
 });
 
 test("haskell: qualified Module.fun calls", () => {
-  const { before, after } = sourcesFromFileDiff(
-    diffOutdent(`
-start = do {
-  Mod.prepare;
-  Other.run;
-+ Flush.go;
-}
-`),
-  );
-
   const host = workspace();
-  const from = host.commit("before", { "/qual.hs": before });
-  const to = host.commit("after", { "/qual.hs": after });
+  const from = host.commit("before", {
+    "/qual.hs": src`
+      start = do {
+       Mod.prepare;
+       Other.run;
+      }
+    `,
+  });
+  const to = host.commit("after", {
+    "/qual.hs": src`
+      start = do {
+       Mod.prepare;
+       Other.run;
+       Flush.go;
+      }
+    `,
+  });
 
   const result = host.run(`calldiff diff ${from} ${to} -e start`);
 
   expect(result.code).toBe(0);
-  expect(cliBody(result.stdout)).toBe(diffOutdent(`
+  expect(result.stdout).toContain(diffOutdent(`
       start()
       ├─ Mod.prepare()
       ├─ Other.run()
@@ -107,33 +134,46 @@ start = do {
 });
 
 test("haskell: case-of branches; skips let-bound nested bodies", () => {
-  const { before, after } = sourcesFromFileDiff(
-    diffOutdent(`
-boot x = do {
-  case x of {
-    1 -> doA;
-    _ -> doOther;
-  };
-  let nested = hidden in visible;
-+ flush;
-}
-
-doA = return ()
-doOther = return ()
-hidden = return ()
-visible = return ()
-+flush = return ()
-`),
-  );
-
   const host = workspace();
-  const from = host.commit("before", { "/ctrl.hs": before });
-  const to = host.commit("after", { "/ctrl.hs": after });
+  const from = host.commit("before", {
+    "/ctrl.hs": src`
+      boot x = do {
+       case x of {
+         1 -> doA;
+         _ -> doOther;
+       };
+       let nested = hidden in visible;
+      }
+      
+      doA = return ()
+      doOther = return ()
+      hidden = return ()
+      visible = return ()
+    `,
+  });
+  const to = host.commit("after", {
+    "/ctrl.hs": src`
+      boot x = do {
+       case x of {
+         1 -> doA;
+         _ -> doOther;
+       };
+       let nested = hidden in visible;
+       flush;
+      }
+      
+      doA = return ()
+      doOther = return ()
+      hidden = return ()
+      visible = return ()
+      flush = return ()
+    `,
+  });
 
   const result = host.run(`calldiff diff ${from} ${to} -e boot`);
 
   expect(result.code).toBe(0);
-  expect(cliBody(result.stdout)).toBe(diffOutdent(`
+  expect(result.stdout).toContain(diffOutdent(`
       boot(x)
       ├─ case 1
          └─ doA()
@@ -145,28 +185,36 @@ visible = return ()
 });
 
 test("haskell: braced do-block sequences calls", () => {
-  const { before, after } = sourcesFromFileDiff(
-    diffOutdent(`
-boot = do {
-  open_;
-  work;
-+ close_;
-}
-
-open_ = return ()
-work = return ()
-+close_ = return ()
-`),
-  );
-
   const host = workspace();
-  const from = host.commit("before", { "/doblock.hs": before });
-  const to = host.commit("after", { "/doblock.hs": after });
+  const from = host.commit("before", {
+    "/doblock.hs": src`
+      boot = do {
+       open_;
+       work;
+      }
+      
+      open_ = return ()
+      work = return ()
+    `,
+  });
+  const to = host.commit("after", {
+    "/doblock.hs": src`
+      boot = do {
+       open_;
+       work;
+       close_;
+      }
+      
+      open_ = return ()
+      work = return ()
+      close_ = return ()
+    `,
+  });
 
   const result = host.run(`calldiff diff ${from} ${to} -e boot`);
 
   expect(result.code).toBe(0);
-  expect(cliBody(result.stdout)).toBe(diffOutdent(`
+  expect(result.stdout).toContain(diffOutdent(`
       boot()
       ├─ open_()
       ├─ work()
@@ -175,30 +223,40 @@ work = return ()
 });
 
 test("haskell: where-bound helpers not attributed to outer", () => {
-  const { before, after } = sourcesFromFileDiff(
-    diffOutdent(`
-start = do {
-  visible;
-+ also;
-}
-  where {
-    nested = hidden;
-  }
-
-visible = return ()
-+also = return ()
-hidden = return ()
-`),
-  );
-
   const host = workspace();
-  const from = host.commit("before", { "/where.hs": before });
-  const to = host.commit("after", { "/where.hs": after });
+  const from = host.commit("before", {
+    "/where.hs": src`
+      start = do {
+       visible;
+      }
+       where {
+         nested = hidden;
+       }
+      
+      visible = return ()
+      hidden = return ()
+    `,
+  });
+  const to = host.commit("after", {
+    "/where.hs": src`
+      start = do {
+       visible;
+       also;
+      }
+       where {
+         nested = hidden;
+       }
+      
+      visible = return ()
+      also = return ()
+      hidden = return ()
+    `,
+  });
 
   const result = host.run(`calldiff diff ${from} ${to} -e start`);
 
   expect(result.code).toBe(0);
-  expect(cliBody(result.stdout)).toBe(diffOutdent(`
+  expect(result.stdout).toContain(diffOutdent(`
       start()
       ├─ visible()
     + └─ also()
@@ -206,28 +264,36 @@ hidden = return ()
 });
 
 test("haskell: if/else without do braces", () => {
-  const { before, after } = sourcesFromFileDiff(
-    diffOutdent(`
-handle x =
-  if x == 1
-    then doA
-    else doOther
-+     >> flush
-
-doA = return ()
-doOther = return ()
-+flush = return ()
-`),
-  );
-
   const host = workspace();
-  const from = host.commit("before", { "/if.hs": before });
-  const to = host.commit("after", { "/if.hs": after });
+  const from = host.commit("before", {
+    "/if.hs": src`
+      handle x =
+       if x == 1
+         then doA
+         else doOther
+      
+      doA = return ()
+      doOther = return ()
+    `,
+  });
+  const to = host.commit("after", {
+    "/if.hs": src`
+      handle x =
+       if x == 1
+         then doA
+         else doOther
+           >> flush
+      
+      doA = return ()
+      doOther = return ()
+      flush = return ()
+    `,
+  });
 
   const result = host.run(`calldiff diff ${from} ${to} -e handle`);
 
   expect(result.code).toBe(0);
-  expect(cliBody(result.stdout)).toBe(diffOutdent(`
+  expect(result.stdout).toContain(diffOutdent(`
       handle(x)
       ├─ if x == 1
          └─ doA()

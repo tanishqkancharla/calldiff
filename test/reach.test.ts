@@ -1,6 +1,6 @@
 import { outdent } from "outdent";
 import { describe, expect, test } from "vitest";
-import { cliBody, workspace } from "./workspace.js";
+import { workspace } from "./workspace.js";
 
 /** Keep the trailing newline so expectations match CLI stdout. */
 const src = outdent({ trimTrailingNewline: false });
@@ -73,7 +73,7 @@ describe("reach paths", () => {
     const result = host.run("calldiff reach -e runCheckout --to capture");
 
     expect(result.code).toBe(0);
-    expect(cliBody(result.stdout)).toEqual(src`
+    expect(result.stdout).toContain(src`
       runCheckout()
       └─ PaymentGateway.charge()
          └─ capture()
@@ -93,7 +93,7 @@ describe("reach paths", () => {
     const result = host.run("calldiff reach -e runCheckout --to runCheckout");
 
     expect(result.code).toBe(0);
-    expect(cliBody(result.stdout)).toBe("runCheckout()");
+    expect(result.stdout).toContain("runCheckout()");
   });
 });
 

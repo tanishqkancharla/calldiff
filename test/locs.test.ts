@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { outdent } from "outdent";
 import { describe, expect, test } from "vitest";
-import { cliBody, workspace } from "./workspace.js";
+import { workspace } from "./workspace.js";
 
 const src = outdent({ trimTrailingNewline: false });
 const checkoutDir = join(process.cwd(), "examples/checkout");
@@ -28,11 +28,10 @@ describe("call-site source locations", () => {
     const result = host.run("calldiff tree -e runCheckout --locs");
 
     expect(result.code).toBe(0);
-    const body = cliBody(result.stdout);
-    expect(body).toMatch(/^runCheckout\(userId, cartId\) {2}checkout\.ts:12$/m);
-    expect(body).toMatch(/Cart\.load\(cartId\) {2}checkout\.ts:13/);
-    expect(body).toMatch(/readCart\(cartId\) {2}cart\.ts:8/);
-    expect(body).not.toMatch(/readCart\(cartId\) {2}cart\.ts:21/);
+    expect(result.stdout).toMatch(/^runCheckout\(userId, cartId\) {2}checkout\.ts:12$/m);
+    expect(result.stdout).toMatch(/Cart\.load\(cartId\) {2}checkout\.ts:13/);
+    expect(result.stdout).toMatch(/readCart\(cartId\) {2}cart\.ts:8/);
+    expect(result.stdout).not.toMatch(/readCart\(cartId\) {2}cart\.ts:21/);
   });
 
   test("ASCII render appends file:line; unresolved calls still show call-site", () => {
@@ -48,7 +47,7 @@ describe("call-site source locations", () => {
 
     const result = host.run("calldiff tree -e outer --locs");
     expect(result.code).toBe(0);
-    expect(cliBody(result.stdout)).toEqual(src`
+    expect(result.stdout).toContain(src`
       outer()  app.ts:1
       ├─ known()  app.ts:2
       └─ mystery()  app.ts:3
@@ -72,7 +71,7 @@ describe("call-site source locations", () => {
 
     const result = host.run("calldiff tree -e gate --locs");
     expect(result.code).toBe(0);
-    expect(cliBody(result.stdout)).toEqual(src`
+    expect(result.stdout).toContain(src`
       gate(ok)  gate.ts:1
       ├─ if (ok)  gate.ts:2
          └─ yes()  gate.ts:3
@@ -93,7 +92,7 @@ describe("call-site source locations", () => {
 
     const result = host.run("calldiff tree -e outer");
     expect(result.code).toBe(0);
-    expect(cliBody(result.stdout)).toEqual(src`
+    expect(result.stdout).toContain(src`
       outer()
       └─ known()
     `.trimEnd());

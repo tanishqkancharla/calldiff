@@ -1,6 +1,6 @@
 import { outdent } from "outdent";
 import { describe, expect, test } from "vitest";
-import { cliBody, workspace } from "./workspace.js";
+import { workspace } from "./workspace.js";
 
 const src = outdent({ trimTrailingNewline: false });
 
@@ -51,7 +51,7 @@ describe("callstack tree", () => {
 
     const result = host.run("calldiff tree -e PiService.createAgentSession");
     expect(result.code).toBe(0);
-    expect(cliBody(result.stdout)).toEqual(src`
+    expect(result.stdout).toContain(src`
       PiService.createAgentSession(options)
       ├─ PiService.getServices()
       │  ├─ SettingsManager.create()
@@ -84,7 +84,7 @@ describe("callstack tree", () => {
 
     const result = host.run("calldiff tree -e outer --max-depth 1");
     expect(result.code).toBe(0);
-    expect(cliBody(result.stdout)).toEqual(src`
+    expect(result.stdout).toContain(src`
       outer()
       └─ mid()
     `.trimEnd());

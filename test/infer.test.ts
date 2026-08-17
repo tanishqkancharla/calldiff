@@ -78,17 +78,7 @@ test("explicit unchanged entries report no callstack changes", () => {
       }
     `,
   });
-  const to = host.commit(
-    "after",
-    {
-      "/app.ts": src`
-        export function root() {
-          sameCall();
-        }
-      `,
-    },
-    { allowEmpty: true },
-  );
+  const to = host.commit("after");
 
   const result = host.run(`calldiff diff ${from} ${to} -e root`);
   expect(result.code).toBe(0);

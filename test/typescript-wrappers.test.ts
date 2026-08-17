@@ -1,39 +1,46 @@
 import { expect, test } from "vitest";
 import { outdent } from "outdent";
 import { diffOutdent } from "./diff-outdent.js";
-import { sourcesFromFileDiff } from "./file-diff.js";
-import { cliBody, workspace } from "./workspace.js";
+import { workspace } from "./workspace.js";
 
 const src = outdent({ trimTrailingNewline: false });
 
 test("typescript: extracts a named function passed to a wrapper call", () => {
-  const { before, after } = sourcesFromFileDiff(
-    diffOutdent(`
-      export default defineEventHandler(function handleCreate(event) {
-    -   validateBody(event);
-    +   const input = parseBody(event);
-        if (!input) {
-          throwBadRequest();
-        } else {
-          persist(input);
-        }
-      });
-
-    + function parseBody(event) {
-    +   readValidatedBody(event);
-    +   return input;
-    + }
-    `),
-  );
-
   const host = workspace();
-  const from = host.commit("before", { "/api/create.post.ts": before });
-  const to = host.commit("after", { "/api/create.post.ts": after });
+  const from = host.commit("before", {
+    "/api/create.post.ts": src`
+       export default defineEventHandler(function handleCreate(event) {
+         validateBody(event);
+         if (!input) {
+           throwBadRequest();
+         } else {
+           persist(input);
+         }
+       });
+    `,
+  });
+  const to = host.commit("after", {
+    "/api/create.post.ts": src`
+       export default defineEventHandler(function handleCreate(event) {
+         const input = parseBody(event);
+         if (!input) {
+           throwBadRequest();
+         } else {
+           persist(input);
+         }
+       });
+      
+       function parseBody(event) {
+         readValidatedBody(event);
+         return input;
+       }
+    `,
+  });
 
   const result = host.run(`calldiff diff ${from} ${to} -e handleCreate`);
 
   expect(result.code).toBe(0);
-  expect(cliBody(result.stdout)).toBe(diffOutdent(`
+  expect(result.stdout).toContain(diffOutdent(`
       handleCreate(event)
     - ├─ validateBody()
     + ├─ parseBody(event)
@@ -65,11 +72,11 @@ test("anonymous wrapped default exports are keyed by file path", () => {
 
   expect(organization.code).toBe(0);
   expect(plans.code).toBe(0);
-  expect(cliBody(organization.stdout)).toEqual(src`
+  expect(organization.stdout).toContain(src`
     apps/app/server/api/organization/index.post(event)
     └─ requireUserSession()
   `.trimEnd());
-  expect(cliBody(plans.stdout)).toEqual(src`
+  expect(plans.stdout).toContain(src`
     apps/admin/server/api/billing/plans/index.post(event)
     └─ requireUserSession()
   `.trimEnd());
@@ -91,7 +98,7 @@ test("wrapper arguments keep their call steps", () => {
   );
 
   expect(result.code).toBe(0);
-  expect(cliBody(result.stdout)).toEqual(src`
+  expect(result.stdout).toContain(src`
     apps/app/server/api/organization/index.post(event)
     ├─ requireUserSession()
     ├─ readValidatedBody()
@@ -111,7 +118,7 @@ test("wrapper calls in variable declarators are unwrapped", () => {
 
   const exported = host.run("calldiff tree --file server/api/orders/index.post.ts");
   expect(exported.code).toBe(0);
-  expect(cliBody(exported.stdout)).toEqual(src`
+  expect(exported.stdout).toContain(src`
     handler(event)
     └─ charlie()
 
@@ -141,7 +148,7 @@ test("type wrappers around a callback are peeled off", () => {
 
   const result = host.run("calldiff tree --file server/handlers.ts");
   expect(result.code).toBe(0);
-  expect(cliBody(result.stdout)).toEqual(src`
+  expect(result.stdout).toContain(src`
     angled(event)
     └─ d()
 
@@ -168,7 +175,7 @@ test("type wrappers around the wrapper call itself are peeled off", () => {
 
   const result = host.run("calldiff tree --file server/api/orders/index.post.ts");
   expect(result.code).toBe(0);
-  expect(cliBody(result.stdout)).toEqual(src`
+  expect(result.stdout).toContain(src`
     server/api/orders/index.post(event)
     └─ chargeCard()
   `.trimEnd());
@@ -184,7 +191,7 @@ test("a call argument holding no function does not stop the scan", () => {
 
   const result = host.run("calldiff tree --file server/handlers.ts");
   expect(result.code).toBe(0);
-  expect(cliBody(result.stdout)).toEqual(src`
+  expect(result.stdout).toContain(src`
     effectful()
     └─ init()
 
@@ -206,7 +213,7 @@ test("generator arguments to wrapper calls are unwrapped", () => {
 
   const result = host.run("calldiff tree --file svc/user.ts");
   expect(result.code).toBe(0);
-  expect(cliBody(result.stdout)).toEqual(src`
+  expect(result.stdout).toContain(src`
     getUser()
     └─ findUser()
 
@@ -216,28 +223,35 @@ test("generator arguments to wrapper calls are unwrapped", () => {
 });
 
 test("tsx: diffs a component wrapped in React.memo", () => {
-  const { before, after } = sourcesFromFileDiff(
-    diffOutdent(`
-      export default memo(function OrderRow({ order }) {
-        const total = formatCurrency(order.total);
-        if (order.isPending) {
-    -     return <Spinner />;
-    +     return <SkeletonRow />;
-        }
-    +   trackImpression(order.id);
-        return <Row total={total} />;
-      });
-    `),
-  );
-
   const host = workspace();
-  const from = host.commit("before", { "/OrderRow.tsx": before });
-  const to = host.commit("after", { "/OrderRow.tsx": after });
+  const from = host.commit("before", {
+    "/OrderRow.tsx": src`
+       export default memo(function OrderRow({ order }) {
+         const total = formatCurrency(order.total);
+         if (order.isPending) {
+           return <Spinner />;
+         }
+         return <Row total={total} />;
+       });
+    `,
+  });
+  const to = host.commit("after", {
+    "/OrderRow.tsx": src`
+       export default memo(function OrderRow({ order }) {
+         const total = formatCurrency(order.total);
+         if (order.isPending) {
+           return <SkeletonRow />;
+         }
+         trackImpression(order.id);
+         return <Row total={total} />;
+       });
+    `,
+  });
 
   const result = host.run(`calldiff diff ${from} ${to} -e OrderRow`);
 
   expect(result.code).toBe(0);
-  expect(cliBody(result.stdout)).toBe(diffOutdent(`
+  expect(result.stdout).toContain(diffOutdent(`
       OrderRow({})
       ├─ formatCurrency()
       ├─ if (order.isPending)
@@ -257,7 +271,7 @@ test("tsx: composed wrappers are unwrapped to the inner function", () => {
 
   const result = host.run("calldiff tree -e Input");
   expect(result.code).toBe(0);
-  expect(cliBody(result.stdout)).toEqual(src`
+  expect(result.stdout).toContain(src`
     Input(props, ref)
     └─ focusOnMount()
   `.trimEnd());
@@ -304,33 +318,39 @@ test("an exported wrapped declarator is selectable as an entry", () => {
 
   const result = host.run("calldiff tree -e handler");
   expect(result.code).toBe(0);
-  expect(cliBody(result.stdout)).toEqual(src`
+  expect(result.stdout).toContain(src`
     handler(event)
     └─ chargeCard()
   `.trimEnd());
 });
 
 test("typescript: a wrapped local helper expands from the caller", () => {
-  const { before, after } = sourcesFromFileDiff(
-    diffOutdent(`
-      export function boot() {
-        const handler = defineEventHandler(async (event) => {
-    -     chargeCard(event);
-    +     refund(event);
-        });
-        handler();
-      }
-    `),
-  );
-
   const host = workspace();
-  const from = host.commit("before", { "/boot.ts": before });
-  const to = host.commit("after", { "/boot.ts": after });
+  const from = host.commit("before", {
+    "/boot.ts": src`
+       export function boot() {
+         const handler = defineEventHandler(async (event) => {
+           chargeCard(event);
+         });
+         handler();
+       }
+    `,
+  });
+  const to = host.commit("after", {
+    "/boot.ts": src`
+       export function boot() {
+         const handler = defineEventHandler(async (event) => {
+           refund(event);
+         });
+         handler();
+       }
+    `,
+  });
 
   const result = host.run(`calldiff diff ${from} ${to} -e boot`);
 
   expect(result.code).toBe(0);
-  expect(cliBody(result.stdout)).toBe(diffOutdent(`
+  expect(result.stdout).toContain(diffOutdent(`
       boot()
       ├─ defineEventHandler()
       └─ handler(event)

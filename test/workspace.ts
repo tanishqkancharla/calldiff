@@ -20,26 +20,6 @@ export type RunResult = {
   code: number;
 };
 
-/**
- * ASCII payload of CLI stdout: drops the `calldiff …` header and incur CTA.
- *
- * Diffs attach a trailing `cta:` block. Exact tree assertions compare the
- * tree, not that chrome.
- */
-export function cliBody(stdout: string): string {
-  let text = stdout.replace(/\ncta:\n[\s\S]*$/, "");
-  text = text.replace(/\n+$/, "");
-  const lines = text.split("\n");
-  if (lines[0]?.startsWith("calldiff ")) lines.shift();
-  if (lines[0] === "") lines.shift();
-  return lines.join("\n");
-}
-
-export type CommitOptions = {
-  /** Needed when the index is unchanged (`git commit` would otherwise fail). */
-  allowEmpty?: boolean;
-};
-
 export type WorkspaceHost = {
   /** Absolute path to the temp git repo. */
   root: string;
@@ -56,13 +36,10 @@ export type WorkspaceHost = {
   remove: (path: string) => void;
   /**
    * Stage and commit. Optional `files` are written first (same as `write`).
+   * With only a message, creates an empty commit.
    * Returns the new HEAD sha.
    */
-  commit: (
-    name: string,
-    files?: Record<string, string>,
-    opts?: CommitOptions,
-  ) => string;
+  commit: (name: string, files?: Record<string, string>) => string;
 };
 
 /**
@@ -120,11 +97,11 @@ export function workspace(files: Record<string, string> = {}): WorkspaceHost {
       }
       rmSync(abs, { force: true });
     },
-    commit(name, files, opts) {
+    commit(name, files) {
       if (files) writeFiles(root, files);
       git(root, ["add", "-A"]);
       const args = ["commit", "-qm", name];
-      if (opts?.allowEmpty) args.push("--allow-empty");
+      if (!files) args.push("--allow-empty");
       git(root, args);
       return git(root, ["rev-parse", "HEAD"]).trim();
     },

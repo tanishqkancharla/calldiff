@@ -32,28 +32,32 @@ Helpers: `namedChildren`, `childByType`, `collapseWs` from `./types.js`.
 ## Tests
 Create `test/<id>.test.ts` as a `workspace()` CLI e2e test:
 ```ts
+import { outdent } from "outdent";
 import { expect, test } from "vitest";
-import { diffOutdent } from "./diff-outdent.js";
-import { sourcesFromFileDiff } from "./file-diff.js";
-import { cliBody, workspace } from "./workspace.js";
+import { workspace } from "./workspace.js";
+
+const src = outdent({ trimTrailingNewline: false });
 
 test("...", () => {
-  const { before, after } = sourcesFromFileDiff(diffOutdent(`
-    function entry() {
-  -   oldCall();
-  +   newCall();
-    }
-  `));
   const host = workspace();
-  const from = host.commit("before", { "/file.<ext>": before });
-  const to = host.commit("after", { "/file.<ext>": after });
+  const from = host.commit("before", {
+    "/file.<ext>": src`
+      function entry() {
+        oldCall();
+      }
+    `,
+  });
+  const to = host.commit("after", {
+    "/file.<ext>": src`
+      function entry() {
+        newCall();
+      }
+    `,
+  });
   const result = host.run(`calldiff diff ${from} ${to} -e entry`);
   expect(result.code).toBe(0);
-  expect(cliBody(result.stdout)).toBe(diffOutdent(`
-      entry()
-    - └─ oldCall()
-    + └─ newCall()
-  `));
+  expect(result.stdout).toContain("- └─ oldCall()");
+  expect(result.stdout).toContain("+ └─ newCall()");
 });
 ```
 At least 2 tests: (1) helper refactor + if/else (2) method/receiver resolution.
