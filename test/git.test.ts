@@ -2,7 +2,7 @@ import { symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { outdent } from "outdent";
 import { expect, test } from "vitest";
-import { cliBody, workspace } from "./workspace.js";
+import { workspace } from "./workspace.js";
 
 const src = outdent({ trimTrailingNewline: false });
 
@@ -25,8 +25,8 @@ test("runs a commit-to-commit diff end to end", () => {
 
   const result = host.run(`calldiff diff ${before} HEAD -e root`);
   expect(result.code).toBe(0);
-  expect(cliBody(result.stdout)).toContain("- ├─ beforeCall()");
-  expect(cliBody(result.stdout)).toContain("+ └─ afterCall()");
+  expect(result.stdout).toContain("- ├─ beforeCall()");
+  expect(result.stdout).toContain("+ └─ afterCall()");
 });
 
 test("lists tracked and non-ignored worktree sources", () => {
@@ -65,11 +65,11 @@ test("lists tracked and non-ignored worktree sources", () => {
 
   const worktreeTracked = host.run("calldiff tree -e tracked");
   expect(worktreeTracked.code).toBe(0);
-  expect(cliBody(worktreeTracked.stdout)).toContain("hit()");
+  expect(worktreeTracked.stdout).toContain("hit()");
 
   const worktreeUntracked = host.run("calldiff tree -e extra");
   expect(worktreeUntracked.code).toBe(0);
-  expect(cliBody(worktreeUntracked.stdout)).toContain("more()");
+  expect(worktreeUntracked.stdout).toContain("more()");
 
   const ignored = host.run("calldiff tree -e skip");
   expect(ignored.code).not.toBe(0);
@@ -80,7 +80,7 @@ test("lists tracked and non-ignored worktree sources", () => {
 
   const deletedCommit = host.run("calldiff tree HEAD -e deleted");
   expect(deletedCommit.code).toBe(0);
-  expect(cliBody(deletedCommit.stdout)).toContain("gone()");
+  expect(deletedCommit.stdout).toContain("gone()");
 
   const untrackedCommit = host.run("calldiff tree HEAD -e extra");
   expect(untrackedCommit.code).not.toBe(0);
@@ -128,11 +128,11 @@ test("reads commit source blobs including unicode names", () => {
 
   const cafe = host.run("calldiff tree HEAD -e café");
   expect(cafe.code).toBe(0);
-  expect(cliBody(cafe.stdout)).toContain("sip()");
+  expect(cafe.stdout).toContain("sip()");
 
   const odd = host.run("calldiff tree HEAD -e odd");
   expect(odd.code).toBe(0);
-  expect(cliBody(odd.stdout)).toContain("weird()");
+  expect(odd.stdout).toContain("weird()");
 
   const ignoredDecl = host.run("calldiff tree HEAD -e ignored");
   expect(ignoredDecl.code).not.toBe(0);

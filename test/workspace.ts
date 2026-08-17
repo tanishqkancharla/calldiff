@@ -1,6 +1,5 @@
 import { spawnSync } from "node:child_process";
 import {
-  existsSync,
   mkdirSync,
   mkdtempSync,
   rmSync,
@@ -12,14 +11,8 @@ import { fileURLToPath } from "node:url";
 import { onTestFinished } from "vitest";
 
 const projectRoot = fileURLToPath(new URL("..", import.meta.url));
-const distCli = join(projectRoot, "dist/cli.js");
 const tsxCli = join(projectRoot, "node_modules/tsx/dist/cli.mjs");
-const srcCli = join(projectRoot, "src/cli.ts");
-
-function cliArgv(): string[] {
-  if (existsSync(distCli)) return [distCli];
-  return [tsxCli, srcCli];
-}
+const calldiffCli = join(projectRoot, "src/cli.ts");
 
 export type RunResult = {
   stdout: string;
@@ -30,8 +23,8 @@ export type RunResult = {
 /**
  * ASCII payload of CLI stdout: drops the `calldiff …` header and incur CTA.
  *
- * Diffs attach a trailing `cta:` block (suggested `tree` commands). Language
- * tests care about the tree, not that chrome.
+ * Diffs attach a trailing `cta:` block. Exact tree assertions compare the
+ * tree, not that chrome.
  */
 export function cliBody(stdout: string): string {
   let text = stdout.replace(/\ncta:\n[\s\S]*$/, "");
@@ -41,6 +34,11 @@ export function cliBody(stdout: string): string {
   if (lines[0] === "") lines.shift();
   return lines.join("\n");
 }
+
+export type CommitOptions = {
+  /** Needed when the index is unchanged (`git commit` would otherwise fail). */
+  allowEmpty?: boolean;
+};
 
 export type WorkspaceHost = {
   /** Absolute path to the temp git repo. */
@@ -60,7 +58,11 @@ export type WorkspaceHost = {
    * Stage and commit. Optional `files` are written first (same as `write`).
    * Returns the new HEAD sha.
    */
-  commit: (name: string, files?: Record<string, string>) => string;
+  commit: (
+    name: string,
+    files?: Record<string, string>,
+    opts?: CommitOptions,
+  ) => string;
 };
 
 /**
@@ -118,30 +120,31 @@ export function workspace(files: Record<string, string> = {}): WorkspaceHost {
       }
       rmSync(abs, { force: true });
     },
-    commit(name, files) {
+    commit(name, files, opts) {
       if (files) writeFiles(root, files);
       git(root, ["add", "-A"]);
-      git(root, ["commit", "-qm", name, "--allow-empty"]);
+      const args = ["commit", "-qm", name];
+      if (opts?.allowEmpty) args.push("--allow-empty");
+      git(root, args);
       return git(root, ["rev-parse", "HEAD"]).trim();
     },
     run(command) {
       const args = normalizeArgv(command);
-      const result = spawnSync(process.execPath, [...cliArgv(), ...args], {
-          cwd: root,
-          encoding: "utf8",
-          timeout: 90_000,
-          killSignal: "SIGKILL",
-          stdio: ["ignore", "pipe", "pipe"],
-          env: {
-            ...process.env,
-            // Keep grammar cache shared with the vitest env.
-            FORCE_COLOR: "0",
-            GIT_TERMINAL_PROMPT: "0",
-            GIT_CONFIG_GLOBAL: "/dev/null",
-            GIT_CONFIG_NOSYSTEM: "1",
-          },
+      const result = spawnSync(process.execPath, [tsxCli, calldiffCli, ...args], {
+        cwd: root,
+        encoding: "utf8",
+        timeout: 90_000,
+        killSignal: "SIGKILL",
+        stdio: ["ignore", "pipe", "pipe"],
+        env: {
+          ...process.env,
+          // Keep grammar cache shared with the vitest env.
+          FORCE_COLOR: "0",
+          GIT_TERMINAL_PROMPT: "0",
+          GIT_CONFIG_GLOBAL: "/dev/null",
+          GIT_CONFIG_NOSYSTEM: "1",
         },
-      );
+      });
       return {
         stdout: result.stdout ?? "",
         stderr: result.stderr ?? "",
@@ -176,19 +179,19 @@ function normalizeWorkspacePath(path: string): string {
 }
 
 function git(cwd: string, args: string[]): string {
-      const result = spawnSync("git", args, {
-        cwd,
-        encoding: "utf8",
-        timeout: 10_000,
-        stdio: ["ignore", "pipe", "pipe"],
-        env: {
-          ...process.env,
-          GIT_TERMINAL_PROMPT: "0",
-          GIT_OPTIONAL_LOCKS: "0",
-          GIT_CONFIG_GLOBAL: "/dev/null",
-          GIT_CONFIG_NOSYSTEM: "1",
-        },
-      });
+  const result = spawnSync("git", args, {
+    cwd,
+    encoding: "utf8",
+    timeout: 10_000,
+    stdio: ["ignore", "pipe", "pipe"],
+    env: {
+      ...process.env,
+      GIT_TERMINAL_PROMPT: "0",
+      GIT_OPTIONAL_LOCKS: "0",
+      GIT_CONFIG_GLOBAL: "/dev/null",
+      GIT_CONFIG_NOSYSTEM: "1",
+    },
+  });
   if (result.status !== 0) {
     throw new Error(
       `git ${args.join(" ")} failed: ${result.stderr || result.stdout}`,

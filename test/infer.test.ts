@@ -1,6 +1,6 @@
 import { outdent } from "outdent";
 import { expect, test } from "vitest";
-import { cliBody, workspace } from "./workspace.js";
+import { workspace } from "./workspace.js";
 
 const src = outdent({ trimTrailingNewline: false });
 
@@ -41,7 +41,7 @@ test("infers only exported ancestors of changed functions", () => {
 
   const result = host.run(`calldiff diff ${from} ${to}`);
   expect(result.code).toBe(0);
-  expect(cliBody(result.stdout)).toContain("changedRoot()");
+  expect(result.stdout).toContain("changedRoot()");
   expect(result.stdout).not.toContain("stableRoot()");
 });
 
@@ -64,9 +64,9 @@ test("falls back to changed non-exported functions", () => {
 
   const result = host.run(`calldiff diff ${from} ${to}`);
   expect(result.code).toBe(0);
-  expect(cliBody(result.stdout)).toContain("worker()");
-  expect(cliBody(result.stdout)).toContain("oldCall()");
-  expect(cliBody(result.stdout)).toContain("newCall()");
+  expect(result.stdout).toContain("worker()");
+  expect(result.stdout).toContain("oldCall()");
+  expect(result.stdout).toContain("newCall()");
 });
 
 test("explicit unchanged entries report no callstack changes", () => {
@@ -78,13 +78,17 @@ test("explicit unchanged entries report no callstack changes", () => {
       }
     `,
   });
-  const to = host.commit("after", {
-    "/app.ts": src`
-      export function root() {
-        sameCall();
-      }
-    `,
-  });
+  const to = host.commit(
+    "after",
+    {
+      "/app.ts": src`
+        export function root() {
+          sameCall();
+        }
+      `,
+    },
+    { allowEmpty: true },
+  );
 
   const result = host.run(`calldiff diff ${from} ${to} -e root`);
   expect(result.code).toBe(0);

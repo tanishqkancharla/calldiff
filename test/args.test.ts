@@ -1,6 +1,6 @@
 import { outdent } from "outdent";
 import { describe, expect, test } from "vitest";
-import { cliBody, workspace } from "./workspace.js";
+import { workspace } from "./workspace.js";
 
 const src = outdent({ trimTrailingNewline: false });
 
@@ -51,7 +51,7 @@ describe("token flags in default ASCII mode", () => {
     });
     const result = host.run("calldiff tree -e boot");
     expect(result.code).toBe(0);
-    expect(cliBody(result.stdout)).toContain("boot()");
+    expect(result.stdout).toContain("boot()");
     expect(result.stdout).not.toMatch(/truncated: showing tokens/);
   });
 
@@ -132,7 +132,7 @@ describe("calldiff CLI", () => {
     });
     const result = host.run("calldiff tree -e boot -- src");
     expect(result.code).toBe(0);
-    expect(cliBody(result.stdout)).toContain("run()");
+    expect(result.stdout).toContain("run()");
     expect(result.stdout).not.toContain("decoy()");
   });
 });

@@ -121,11 +121,11 @@ test("wrapper calls in variable declarators are unwrapped", () => {
 
   const cached = host.run("calldiff tree -e cached");
   expect(cached.code).toBe(0);
-  expect(cliBody(cached.stdout)).toContain("delta()");
+  expect(cached.stdout).toContain("delta()");
 
   const plain = host.run("calldiff tree -e plain");
   expect(plain.code).toBe(0);
-  expect(cliBody(plain.stdout)).toContain("golf()");
+  expect(plain.stdout).toContain("golf()");
 });
 
 test("type wrappers around a callback are peeled off", () => {
@@ -277,7 +277,7 @@ test("tsx: a wrapper over a bare reference adds nothing", () => {
 
   const base = host.run("calldiff tree -e RowBase");
   expect(base.code).toBe(0);
-  expect(cliBody(base.stdout)).toContain("renderCell()");
+  expect(base.stdout).toContain("renderCell()");
 });
 
 test("tsx: an anonymous memo callback keys off the declared name", () => {
@@ -291,8 +291,8 @@ test("tsx: an anonymous memo callback keys off the declared name", () => {
 
   const result = host.run("calldiff tree -e OrderBadge");
   expect(result.code).toBe(0);
-  expect(cliBody(result.stdout)).toContain("OrderBadge(");
-  expect(cliBody(result.stdout)).toContain("Badge()");
+  expect(result.stdout).toContain("OrderBadge(");
+  expect(result.stdout).toContain("Badge()");
 });
 
 test("an exported wrapped declarator is selectable as an entry", () => {
