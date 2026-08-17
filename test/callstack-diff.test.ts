@@ -435,7 +435,7 @@ test("treats tagged templates as calls", () => {
   const from = host.commit("before", {
     "/file.ts": src`
        export function boot() {
-         css\\\`color: red\\\`;
+         css\`color: red\`;
          work();
        }
        function css(_s: TemplateStringsArray) {}
@@ -445,8 +445,8 @@ test("treats tagged templates as calls", () => {
   const to = host.commit("after", {
     "/file.ts": src`
        export function boot() {
-         css\\\`color: red\\\`;
-         html\\\`<div/>\\\`;
+         css\`color: red\`;
+         html\`<div/>\`;
          work();
        }
        function css(_s: TemplateStringsArray) {}

@@ -11,13 +11,13 @@ test("php: refactors calls into a helper with if/else", () => {
     "/pi.php": src`
        <?php
        class PiService {
-           public static function create_agent_session(\\$options) {
+           public static function create_agent_session($options) {
                AuthStorage::create();
                create_coding_tools();
-               if (!\\$options) {
+               if (!$options) {
                    SessionManager::create();
                } else {
-                   SessionManager::open(\\$options);
+                   SessionManager::open($options);
                }
            }
        }
@@ -26,7 +26,7 @@ test("php: refactors calls into a helper with if/else", () => {
        }
        class SessionManager {
            public static function create() {}
-           public static function open(\\$id) {}
+           public static function open($id) {}
        }
        class Services {
            public function boot() {}
@@ -38,13 +38,13 @@ test("php: refactors calls into a helper with if/else", () => {
     "/pi.php": src`
        <?php
        class PiService {
-           public static function create_agent_session(\\$options) {
-               \\$services = self::get_services();
-               \\$services->boot();
-               if (!\\$options) {
+           public static function create_agent_session($options) {
+               $services = self::get_services();
+               $services->boot();
+               if (!$options) {
                    SessionManager::create();
                } else {
-                   SessionManager::open(\\$options);
+                   SessionManager::open($options);
                }
            }
            public static function get_services() {
@@ -58,7 +58,7 @@ test("php: refactors calls into a helper with if/else", () => {
        }
        class SessionManager {
            public static function create() {}
-           public static function open(\\$id) {}
+           public static function open($id) {}
        }
        class Services {
            public function boot() {}
@@ -93,8 +93,8 @@ test("php: \$this->method resolves to Class.method", () => {
        <?php
        class Runner {
            public function start() {
-               \\$this->prepare();
-               \\$this->run();
+               $this->prepare();
+               $this->run();
            }
            public function prepare() {}
            public function run() {}
@@ -106,9 +106,9 @@ test("php: \$this->method resolves to Class.method", () => {
        <?php
        class Runner {
            public function start() {
-               \\$this->prepare();
-               \\$this->validate();
-               \\$this->run();
+               $this->prepare();
+               $this->validate();
+               $this->run();
            }
            public function prepare() {}
            public function validate() {}
@@ -178,8 +178,8 @@ test("php: does not attribute nested closure/arrow bodies", () => {
     "/nested.php": src`
        <?php
        function outer() {
-           \\$f = function() { hidden(); };
-           \\$g = fn() => also_hidden();
+           $f = function() { hidden(); };
+           $g = fn() => also_hidden();
            visible();
        }
        function hidden() {}
@@ -191,8 +191,8 @@ test("php: does not attribute nested closure/arrow bodies", () => {
     "/nested.php": src`
        <?php
        function outer() {
-           \\$f = function() { hidden(); };
-           \\$g = fn() => also_hidden();
+           $f = function() { hidden(); };
+           $g = fn() => also_hidden();
            visible();
            also_visible();
        }
@@ -218,10 +218,10 @@ test("php: elseif chains", () => {
   const from = host.commit("before", {
     "/elif.php": src`
        <?php
-       function handle(\\$status) {
-           if (\\$status == 1) {
+       function handle($status) {
+           if ($status == 1) {
                do_a();
-           } elseif (\\$status == 2) {
+           } elseif ($status == 2) {
                do_b();
            } else {
                do_other();
@@ -235,10 +235,10 @@ test("php: elseif chains", () => {
   const to = host.commit("after", {
     "/elif.php": src`
        <?php
-       function handle(\\$status) {
-           if (\\$status == 1) {
+       function handle($status) {
+           if ($status == 1) {
                do_a();
-           } elseif (\\$status == 2) {
+           } elseif ($status == 2) {
                do_b();
                do_extra();
            } else {
@@ -275,7 +275,7 @@ test("php: try/catch/finally as branches", () => {
        function boot() {
            try {
                open_();
-           } catch (Exception \\$e) {
+           } catch (Exception $e) {
                recover();
            } finally {
                close_();
@@ -292,7 +292,7 @@ test("php: try/catch/finally as branches", () => {
        function boot() {
            try {
                open_();
-           } catch (Exception \\$e) {
+           } catch (Exception $e) {
                recover();
            } finally {
                close_();
@@ -330,7 +330,7 @@ test("php: self/parent and private methods", () => {
            public function start() {
                self::helper();
                parent::setup();
-               \\$this->secret();
+               $this->secret();
            }
            public static function helper() {
                work();
@@ -350,7 +350,7 @@ test("php: self/parent and private methods", () => {
            public function start() {
                self::helper();
                parent::setup();
-               \\$this->secret();
+               $this->secret();
                self::extra();
            }
            public static function helper() {
