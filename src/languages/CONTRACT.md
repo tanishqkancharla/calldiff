@@ -22,7 +22,7 @@ Helpers: `namedChildren`, `childByType`, `collapseWs` from `./types.js`.
 2. Calls: bare + member/receiver (`self`/`this`/recv → `Type.method`)
 3. Constructors / `new` analogue when the language has one
 4. if/else (and elif if present) as branches with source-text labels
-5. Nested function/lambda bodies NOT attributed to outer caller
+5. Nested function/lambda bodies NOT attributed to the outer caller. Argument calls and callback bodies belong under the receiving call.
 6. Ignore computed/dynamic callees when obvious
 
 ## Do NOT edit

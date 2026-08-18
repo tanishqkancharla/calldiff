@@ -23,6 +23,11 @@ function isFnLike(type: string): boolean {
   );
 }
 
+/** Nested function/arrow, not a method — skip as a sibling, maybe nest under a call. */
+function isCallback(type: string): boolean {
+  return isFnLike(type) && type !== "method_definition";
+}
+
 function getParamsLabel(params: SyntaxNode | null): string {
   if (!params || params.type !== "formal_parameters") return "()";
   const parts: string[] = [];
@@ -150,10 +155,29 @@ function collectStatements(
     steps.push({ type: "call", key, ...locFromNode(file, node) });
   };
 
+  const emitCall = (
+    key: string | null,
+    node: SyntaxNode,
+    nested: CallStep[],
+  ) => {
+    if (key && nested.length > 0) {
+      steps.push({
+        type: "call",
+        key,
+        ...locFromNode(file, node),
+        children: nested,
+      });
+    } else if (key) {
+      addCall(key, node);
+    } else {
+      steps.push(...nested);
+    }
+  };
+
   const walkExpr = (node: SyntaxNode): void => {
     const type = node.type;
 
-    if (isFnLike(type) && type !== "method_definition") {
+    if (isCallback(type)) {
       return;
     }
 
@@ -229,28 +253,12 @@ function collectStatements(
       const key =
         bare && isNew && !bare.startsWith("new ") ? `new ${bare}` : bare;
       const args = childByType(node, "arguments");
-      const hoisted = hoistsCallback(node);
-      const nested =
-        args && !hoisted ? stepsFromArguments(file, args, className) : [];
-
-      if (key && nested.length > 0) {
-        steps.push({
-          type: "call",
-          key,
-          ...locFromNode(file, node),
-          children: nested,
-        });
-      } else {
-        if (key) addCall(key, node);
-        for (const step of nested) steps.push(step);
-      }
-
-      // A hoisted wrapper's arguments still contribute their own calls as
-      // siblings — only the callback is left to the definition it becomes.
-      if (args && hoisted) {
-        for (const child of namedChildren(args)) walkExpr(child);
-      }
-      // `foo(x).bar()` keeps `foo` — the receiver side is not an argument.
+      emitCall(
+        key,
+        node,
+        args ? stepsFromArguments(file, args, className) : [],
+      );
+      // `foo(x).bar()` keeps `foo` — the receiver is not an argument.
       if (callee) walkExpr(callee);
       return;
     }
@@ -276,44 +284,19 @@ function collectStatements(
         ...fromAttrs,
         ...collectStatements(file, childNodes, className),
       ];
-      if (opening) {
-        const key = jsxCalleeKey(opening);
-        if (key) {
-          if (nested.length > 0) {
-            steps.push({
-              type: "call",
-              key,
-              ...locFromNode(file, opening),
-              children: nested,
-            });
-          } else {
-            addCall(key, opening);
-          }
-          return;
-        }
-      }
-      for (const step of nested) steps.push(step);
+      emitCall(opening ? jsxCalleeKey(opening) : null, opening ?? node, nested);
       return;
-    } else if (type === "jsx_self_closing_element") {
+    }
+
+    if (type === "jsx_self_closing_element") {
       const attrNodes = namedChildren(node).filter(
         (c) => c.type === "jsx_attribute" || c.type === "jsx_expression",
       );
-      const nested = collectStatements(file, attrNodes, className);
-      const key = jsxCalleeKey(node);
-      if (key) {
-        if (nested.length > 0) {
-          steps.push({
-            type: "call",
-            key,
-            ...locFromNode(file, node),
-            children: nested,
-          });
-        } else {
-          addCall(key, node);
-        }
-      } else {
-        for (const step of nested) steps.push(step);
-      }
+      emitCall(
+        jsxCalleeKey(node),
+        node,
+        collectStatements(file, attrNodes, className),
+      );
       return;
     }
 
@@ -329,48 +312,27 @@ function collectStatements(
   return steps;
 }
 
-/**
- * The body a function node runs: its statement block, or the single expression
- * of a concise arrow. Everything else a function node holds — parameters, type
- * parameters, the return annotation, modifiers, its own name — is skipped.
- *
- * `comment` is skipped for the same reason, and it is the subtle one:
- * tree-sitter reports comments as NAMED children, so `(event) => // why\n
- * process(event)` puts one exactly where the body is looked for, and taking it
- * leaves the function with no calls at all.
- */
+/** Named children of a function node that are never its runtime body. */
+const NON_BODY = new Set([
+  "comment",
+  "formal_parameters",
+  "type_parameters",
+  "type_annotation",
+  "identifier",
+  "accessibility_modifier",
+  "async",
+  "readonly",
+]);
+
 function bodyOf(node: SyntaxNode): SyntaxNode | null {
   return (
     childByType(node, "statement_block") ??
-    namedChildren(node).find(
-      (c) =>
-        c.type !== "comment" &&
-        c.type !== "formal_parameters" &&
-        c.type !== "type_parameters" &&
-        c.type !== "type_annotation" &&
-        c.type !== "identifier" &&
-        c.type !== "accessibility_modifier" &&
-        c.type !== "async" &&
-        c.type !== "readonly",
-    ) ??
+    namedChildren(node).find((c) => !NON_BODY.has(c.type)) ??
     null
   );
 }
 
-/**
- * Peel a curried declaration down to the body that holds its calls.
- *
- * `const f = (a) => (b) => leaf()` is one logical function whose arguments are
- * split across arrows: the outer arrow's body IS the next arrow, so stopping
- * at it (contract #5 — a nested lambda is not the outer caller's) leaves the
- * declaration with no steps at all. Every call site writes `f(a)(b)`, so the
- * steps belong to the name they are reached through. Effect combinators,
- * Redux-style middleware and React HOCs are all this shape.
- *
- * Only a body that IS a function is peeled. One RETURNED among other
- * statements (`function make() { setup(); return () => tick() }`) is a factory
- * whose product runs later, at a call site of its own, so it stays out.
- */
+/** Peel `(a) => (b) => body` to `body`. A returned factory (`return () => tick()`) stays out. */
 function unwrapCurriedBody(body: SyntaxNode | null): SyntaxNode | null {
   let current = body ? stripTypeWrappers(body) : null;
   while (
@@ -387,25 +349,20 @@ function unwrapCurriedBody(body: SyntaxNode | null): SyntaxNode | null {
 }
 
 /**
- * Steps written inside a call's parentheses, in argument order: the calls a
- * plain argument makes, and the BODY of a function argument.
- *
- * They become children of the call rather than steps of the enclosing
- * function, which is what contract #5 protects — `items.map(cb)` runs `cb`,
- * the function around it does not. Kotlin already reads a trailing lambda this
- * way, and the JSX branch already nests a component's children; this is the
- * same shape for `.then`, `useEffect`, `describe`/`it` and every Effect
- * combinator, where the whole program lives in callbacks.
+ * Calls and callback bodies inside `(...)`, as children of the receiving call.
+ * Skip a callback already registered as its own definition (`const x = wrap(fn)`).
  */
 function stepsFromArguments(
   file: string,
   args: SyntaxNode,
   className: string | null,
 ): CallStep[] {
+  const skipCallbacks = args.parent ? hoistsCallback(args.parent) : false;
   const steps: CallStep[] = [];
   for (const rawArg of namedChildren(args)) {
     const arg = stripTypeWrappers(rawArg);
-    if (isFnLike(arg.type) && arg.type !== "method_definition") {
+    if (isCallback(arg.type)) {
+      if (skipCallbacks) continue;
       steps.push(
         ...collectStepsFromBody(
           file,
@@ -420,13 +377,7 @@ function stepsFromArguments(
   return steps;
 }
 
-/**
- * Whether this call's function argument is hoisted into a definition of its
- * own: `const handler = defineEventHandler(cb)`, `export default memo(fn)`.
- * `extractDeclaratorFunction` / `visitStatement` register the callback under
- * the declared name, and the tree expands it from its call site, so nesting
- * the body here as well would print it twice.
- */
+/** True when this call's callback is extracted as a named definition. */
 function hoistsCallback(call: SyntaxNode): boolean {
   let current: SyntaxNode | null = call.parent;
   while (current && TRANSPARENT_EXPRESSIONS.has(current.type)) {
@@ -439,7 +390,6 @@ function hoistsCallback(call: SyntaxNode): boolean {
   ) {
     return true;
   }
-  // Wrappers compose: `export default memo(forwardRef(fn))` claims `fn` too.
   if (current.type === "arguments") {
     const outer = current.parent;
     return outer?.type === "call_expression" ? hoistsCallback(outer) : false;
@@ -550,7 +500,7 @@ function unwrapWrappedFunction(
       continue;
     }
     // Generators count too: `Effect.gen(function* () {...})` is this shape.
-    if (arg.type === "method_definition" || !isFnLike(arg.type)) continue;
+    if (!isCallback(arg.type)) continue;
     const named = childByType(arg, "identifier");
     handleFunctionNode(
       file,
