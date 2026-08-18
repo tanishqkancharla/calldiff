@@ -218,6 +218,8 @@ test("typescript: reach walks through callback nesting", () => {
       function parentSpanFromRequest(request) {
         parseTraceparent(request.header)
       }
+
+      function parseTraceparent(header) {}
     `,
   });
 
