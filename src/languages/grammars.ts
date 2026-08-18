@@ -1,16 +1,13 @@
 import { createRequire } from "node:module";
 import { execFileSync } from "node:child_process";
-import { randomBytes } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
   readFileSync,
-  renameSync,
-  rmSync,
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 
 export type GrammarModule = {
   language?: unknown;
@@ -26,100 +23,24 @@ export function grammarCacheDir(): string {
   return join(homedir(), ".cache", "calldiff", "grammars");
 }
 
-/** Per-package prefix so concurrent installs do not share a node_modules. */
-function isolatedPrefix(cacheDir: string, npmPackage: string): string {
-  return join(cacheDir, "packages", ...npmPackage.split("/"));
+function packageInstalled(cacheDir: string, npmPackage: string): boolean {
+  return existsSync(join(cacheDir, "node_modules", npmPackage));
 }
 
-function packageRoot(prefix: string, npmPackage: string): string {
-  return join(prefix, "node_modules", npmPackage);
-}
-
-function isInstalled(prefix: string, npmPackage: string): boolean {
-  return existsSync(packageRoot(prefix, npmPackage));
-}
-
-function writeStubPackageJson(dir: string): void {
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(
-    join(dir, "package.json"),
-    JSON.stringify({
-      name: "calldiff-grammar-cache",
-      private: true,
-      description: "On-demand tree-sitter grammars for calldiff",
-    }),
-    "utf8",
-  );
-}
-
-/**
- * Install one grammar into `packages/<name>/` via a unique staging dir, then
- * rename into place.
- *
- * The race: several `calldiff` processes share one cache dir. On first use of
- * Swift vs Kotlin they both ran `npm install --prefix <cache> <pkg>` into the
- * **same** `node_modules`. npm extracts tarballs by mkdir/rename in that tree
- * (and into a shared `node_modules/.staging`). Two extracts hitting the same
- * path throw ENOTEMPTY — even when the packages are different, because they
- * also unpack common deps (`node-gyp-build`, `tree-sitter`, …) into one folder.
- *
- * A mutex around the whole cache serialized unrelated installs. A different
- * package manager does not help: `pnpm add` into one project still mutates one
- * `node_modules`. The published CLI also cannot assume pnpm is on PATH.
- *
- * Isolation: each package is its own npm `--prefix`. Extracts never share a
- * tree. Two processes installing the *same* package still both extract, then
- * race on `rename(staging → dest)` — first wins, loser drops staging.
- */
-function installIsolated(cacheDir: string, npmPackage: string): void {
-  const dest = isolatedPrefix(cacheDir, npmPackage);
-  if (isInstalled(dest, npmPackage)) return;
-
-  const staging = join(
-    cacheDir,
-    ".staging",
-    `${npmPackage.replace(/\//g, "__")}-${process.pid}-${randomBytes(4).toString("hex")}`,
-  );
-  writeStubPackageJson(staging);
-  const installSpec = INSTALL_SPEC[npmPackage] ?? npmPackage;
-  try {
-    execFileSync(
-      "npm",
-      [
-        "install",
-        "--prefix",
-        staging,
-        "--no-save",
-        "--no-fund",
-        "--no-audit",
-        "--legacy-peer-deps",
-        installSpec,
-      ],
-      {
-        stdio: ["ignore", "pipe", "pipe"],
-        env: process.env,
-      },
+function ensureCachePackageJson(cacheDir: string): void {
+  mkdirSync(cacheDir, { recursive: true });
+  const pkgPath = join(cacheDir, "package.json");
+  if (!existsSync(pkgPath)) {
+    writeFileSync(
+      pkgPath,
+      JSON.stringify({
+        name: "calldiff-grammar-cache",
+        private: true,
+        description: "On-demand tree-sitter grammars for calldiff",
+      }),
+      "utf8",
     );
-    mkdirSync(dirname(dest), { recursive: true });
-    try {
-      renameSync(staging, dest);
-    } catch (err) {
-      rmSync(staging, { recursive: true, force: true });
-      if (isInstalled(dest, npmPackage)) return;
-      throw err;
-    }
-  } catch (err) {
-    rmSync(staging, { recursive: true, force: true });
-    throw err;
   }
-}
-
-function resolvePrefix(cacheDir: string, npmPackage: string): string {
-  const isolated = isolatedPrefix(cacheDir, npmPackage);
-  if (isInstalled(isolated, npmPackage)) return isolated;
-  // Pre-isolation caches lived in a single shared node_modules.
-  if (isInstalled(cacheDir, npmPackage)) return cacheDir;
-  return isolated;
 }
 
 /**
@@ -127,16 +48,16 @@ function resolvePrefix(cacheDir: string, npmPackage: string): string {
  * with top-level await, which `require()` cannot load. Fall back to the native
  * `.node` addon via node-gyp-build — same payload the JS wrapper would return.
  */
-function loadNativeBinding(packageRootDir: string): GrammarModule | null {
+function loadNativeBinding(packageRoot: string): GrammarModule | null {
   try {
-    const require = createRequire(join(packageRootDir, "package.json"));
+    const require = createRequire(join(packageRoot, "package.json"));
     const gypBuild = require("node-gyp-build") as (
       root: string,
     ) => GrammarModule;
-    const binding = gypBuild(packageRootDir);
+    const binding = gypBuild(packageRoot);
     try {
       (binding as { nodeTypeInfo?: unknown }).nodeTypeInfo = require(
-        join(packageRootDir, "src", "node-types.json"),
+        join(packageRoot, "src", "node-types.json"),
       );
     } catch {
       // optional metadata
@@ -150,7 +71,7 @@ function loadNativeBinding(packageRootDir: string): GrammarModule | null {
 function requireGrammar(
   require: NodeRequire,
   npmPackage: string,
-  packageRootDir: string,
+  packageRoot: string,
 ): GrammarModule {
   try {
     return require(npmPackage) as GrammarModule;
@@ -161,7 +82,7 @@ function requireGrammar(
       code === "ERR_REQUIRE_ASYNC_MODULE" ||
       msg.includes("top-level await")
     ) {
-      const binding = loadNativeBinding(packageRootDir);
+      const binding = loadNativeBinding(packageRoot);
       if (binding) return binding;
     }
     throw err;
@@ -194,8 +115,8 @@ export function loadGrammarPackage(npmPackage: string): GrammarModule {
         msg.includes("top-level await")
       ) {
         const entry = localRequire.resolve(npmPackage);
-        const packageRootDir = join(entry, "..", "..");
-        const binding = loadNativeBinding(packageRootDir);
+        const packageRoot = join(entry, "..", "..");
+        const binding = loadNativeBinding(packageRoot);
         if (binding) return binding;
       }
       throw err;
@@ -205,18 +126,31 @@ export function loadGrammarPackage(npmPackage: string): GrammarModule {
   }
 
   const cacheDir = grammarCacheDir();
-  const prefix = resolvePrefix(cacheDir, npmPackage);
-  if (!isInstalled(prefix, npmPackage)) {
-    installIsolated(cacheDir, npmPackage);
+  if (!packageInstalled(cacheDir, npmPackage)) {
+    ensureCachePackageJson(cacheDir);
+    const installSpec = INSTALL_SPEC[npmPackage] ?? npmPackage;
+    execFileSync(
+      "npm",
+      [
+        "install",
+        "--prefix",
+        cacheDir,
+        "--no-save",
+        "--no-fund",
+        "--no-audit",
+        "--legacy-peer-deps",
+        installSpec,
+      ],
+      {
+        stdio: ["ignore", "pipe", "pipe"],
+        env: process.env,
+      },
+    );
   }
 
-  const installed = resolvePrefix(cacheDir, npmPackage);
-  const require = createRequire(join(installed, "package.json"));
-  return requireGrammar(
-    require,
-    npmPackage,
-    packageRoot(installed, npmPackage),
-  );
+  const require = createRequire(join(cacheDir, "package.json"));
+  const packageRoot = join(cacheDir, "node_modules", npmPackage);
+  return requireGrammar(require, npmPackage, packageRoot);
 }
 
 /** Resolve the value to pass to parser.setLanguage. */
@@ -236,10 +170,7 @@ export function readCachedPackageVersion(
   npmPackage: string,
 ): string | null {
   const cacheDir = grammarCacheDir();
-  const pkgJson = join(
-    packageRoot(resolvePrefix(cacheDir, npmPackage), npmPackage),
-    "package.json",
-  );
+  const pkgJson = join(cacheDir, "node_modules", npmPackage, "package.json");
   if (!existsSync(pkgJson)) return null;
   try {
     const raw = JSON.parse(readFileSync(pkgJson, "utf8")) as {
