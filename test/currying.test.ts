@@ -1,133 +1,192 @@
-import { expect, test as vitestTest } from "vitest";
-import { extractFunctions } from "../src/extract.js";
-import type { FunctionInfo } from "../src/types.js";
-import { test } from "./expectCallstack.js";
-import { stepShape } from "./helpers.js";
+import { outdent } from "outdent";
+import { expect, test } from "vitest";
+import { diffOutdent } from "./diff-outdent.js";
+import { workspace } from "./workspace.js";
 
-/** Call keys of a function's steps, in order (branches drop out as `false`). */
-function callKeys(fn: FunctionInfo | undefined): unknown[] {
-  return (fn?.steps ?? []).map((step) => step.type === "call" && step.key);
-}
+const src = outdent({ trimTrailingNewline: false });
 
-vitestTest("typescript: a curried arrow chain keeps the outer name's steps", () => {
-  const functions = extractFunctions(
-    "src/tracer.ts",
-    `export const traceRequest = (options) => (effect) =>
-       withTracer(effect, makeTracer(options))`,
-  );
+test("typescript: a curried arrow chain keeps the outer name's steps", () => {
+  const host = workspace({
+    "/src/tracer.ts": src`
+      export const traceRequest = (options) => (effect) =>
+        withTracer(effect, makeTracer(options))
+    `,
+  });
 
-  // The chain is one logical function: the inner arrow is not its own entry.
-  expect(functions.map((fn) => fn.key)).toEqual(["traceRequest"]);
-  expect(stepShape(functions[0])).toBe(["withTracer", "  makeTracer"].join("\n"));
+  const result = host.run("calldiff tree --file src/tracer.ts");
+
+  expect(result.code).toBe(0);
+  expect(result.stdout).toContain(src`
+    traceRequest(options)
+    └─ withTracer()
+       └─ makeTracer()
+  `.trimEnd());
 });
 
-vitestTest("typescript: every arrow in the chain is peeled, not just one", () => {
-  const [middleware] = extractFunctions(
-    "src/middleware.ts",
-    `export const middleware = (store) => (next) => (action) => {
-       log(action)
-       return next(action)
-     }`,
-  );
-
-  expect(middleware?.label).toBe("middleware(store)");
-  expect(callKeys(middleware)).toEqual(["log", "next"]);
-});
-
-vitestTest("typescript: generics and return annotations do not hide the body", () => {
-  const [traceRequest] = extractFunctions(
-    "src/aeTracer.ts",
-    `export const traceRequest =
-       <E, R>(options: Options<E, R>) =>
-       <A, E2>(effect: Effect.Effect<A, E2>): Effect.Effect<A, E2> =>
-         Effect.flatMap(currentRequest(), (request) => runTraced(request, effect))`,
-  );
-
-  // The argument call and the callback body both hang under the call.
-  expect(stepShape(traceRequest)).toBe(
-    ["Effect.flatMap", "  currentRequest", "  runTraced"].join("\n"),
-  );
-});
-
-vitestTest("typescript: a curried class property is peeled too", () => {
-  const functions = extractFunctions(
-    "src/Store.ts",
-    `export class Store {
-       select = (key) => (state) => read(state, key)
-     }`,
-  );
-
-  expect(functions.map((fn) => fn.key)).toEqual(["Store.select"]);
-  expect(callKeys(functions[0])).toEqual(["read"]);
-});
-
-vitestTest("typescript: an argument callback is still not the caller's", () => {
-  const [boot] = extractFunctions(
-    "src/boot.ts",
-    `export function boot(items) {
-       items.map((item) => render(item))
-     }`,
-  );
-
-  expect(callKeys(boot)).toEqual(["items.map"]);
-});
-
-vitestTest("typescript: a function returned among statements stays out", () => {
-  const [makeCounter] = extractFunctions(
-    "src/counter.ts",
-    `export function makeCounter() {
-       setup()
-       return () => tick()
-     }`,
-  );
-
-  // A factory's product runs later, at a call site of its own — attributing
-  // `tick` to `makeCounter` would claim it runs when the factory is called.
-  expect(callKeys(makeCounter)).toEqual(["setup"]);
-});
-
-vitestTest("javascript: a curried arrow chain keeps the outer name's steps", () => {
-  const functions = extractFunctions(
-    "src/middleware.js",
-    `export const middleware = (store) => (next) => (action) => {
-       log(action)
-       return next(action)
-     }`,
-  );
-
-  expect(functions.map((fn) => fn.key)).toEqual(["middleware"]);
-  expect(callKeys(functions[0])).toEqual(["log", "next"]);
-});
-
-vitestTest("tsx: a curried HOC reports the component it renders", () => {
-  const [withAuth] = extractFunctions(
-    "src/withAuth.tsx",
-    `export const withAuth = (Component) => (props) => {
-       useSession()
-       return <Component {...props} />
-     }`,
-  );
-
-  expect(callKeys(withAuth)).toEqual(["useSession", "Component"]);
-});
-
-test("typescript: a curried combinator diffs under its own name", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("typescript: every arrow in the chain is peeled, not just one", () => {
+  const host = workspace({
+    "/src/middleware.ts": src`
       export const middleware = (store) => (next) => (action) => {
-    -   log(action);
-    +   audit(action);
+        log(action)
+        return next(action)
+      }
+    `,
+  });
+
+  const result = host.run("calldiff tree -e middleware");
+
+  expect(result.code).toBe(0);
+  expect(result.stdout).toContain(src`
+    middleware(store)
+    ├─ log()
+    └─ next()
+  `.trimEnd());
+});
+
+test("typescript: generics and return annotations do not hide the body", () => {
+  const host = workspace({
+    "/src/aeTracer.ts": src`
+      export const traceRequest =
+        <E, R>(options: Options<E, R>) =>
+        <A, E2>(effect: Effect.Effect<A, E2>): Effect.Effect<A, E2> =>
+          Effect.flatMap(currentRequest(), (request) => runTraced(request, effect))
+    `,
+  });
+
+  const result = host.run("calldiff tree -e traceRequest");
+
+  expect(result.code).toBe(0);
+  expect(result.stdout).toContain(src`
+    traceRequest(options)
+    └─ Effect.flatMap()
+       ├─ currentRequest()
+       └─ runTraced()
+  `.trimEnd());
+});
+
+test("typescript: a curried class property is peeled too", () => {
+  const host = workspace({
+    "/src/Store.ts": src`
+      export class Store {
+        select = (key) => (state) => read(state, key)
+      }
+    `,
+  });
+
+  const result = host.run("calldiff tree -e Store.select");
+
+  expect(result.code).toBe(0);
+  expect(result.stdout).toContain(src`
+    Store.select(key)
+    └─ read()
+  `.trimEnd());
+});
+
+test("typescript: an argument callback is still not the caller's", () => {
+  const host = workspace({
+    "/src/boot.ts": src`
+      export function boot(items) {
+        items.map((item) => render(item))
+      }
+    `,
+  });
+
+  const result = host.run("calldiff tree -e boot");
+
+  expect(result.code).toBe(0);
+  expect(result.stdout).toContain(src`
+    boot(items)
+    └─ items.map()
+       └─ render()
+  `.trimEnd());
+});
+
+test("typescript: a function returned among statements stays out", () => {
+  const host = workspace({
+    "/src/counter.ts": src`
+      export function makeCounter() {
+        setup()
+        return () => tick()
+      }
+    `,
+  });
+
+  const result = host.run("calldiff tree -e makeCounter");
+
+  expect(result.code).toBe(0);
+  expect(result.stdout).toContain(src`
+    makeCounter()
+    └─ setup()
+  `.trimEnd());
+  expect(result.stdout).not.toContain("tick");
+});
+
+test("javascript: a curried arrow chain keeps the outer name's steps", () => {
+  const host = workspace({
+    "/src/middleware.js": src`
+      export const middleware = (store) => (next) => (action) => {
+        log(action)
+        return next(action)
+      }
+    `,
+  });
+
+  const result = host.run("calldiff tree -e middleware");
+
+  expect(result.code).toBe(0);
+  expect(result.stdout).toContain(src`
+    middleware(store)
+    ├─ log()
+    └─ next()
+  `.trimEnd());
+});
+
+test("tsx: a curried HOC reports the component it renders", () => {
+  const host = workspace({
+    "/src/withAuth.tsx": src`
+      export const withAuth = (Component) => (props) => {
+        useSession()
+        return <Component {...props} />
+      }
+    `,
+  });
+
+  const result = host.run("calldiff tree -e withAuth");
+
+  expect(result.code).toBe(0);
+  expect(result.stdout).toContain(src`
+    withAuth(Component)
+    ├─ useSession()
+    └─ Component()
+  `.trimEnd());
+});
+
+test("typescript: a curried combinator diffs under its own name", () => {
+  const host = workspace();
+  const from = host.commit("before", {
+    "/middleware.ts": src`
+      export const middleware = (store) => (next) => (action) => {
+        log(action);
         return next(action);
       };
     `,
-    "middleware",
-    { file: "middleware.ts" },
-  ).toEqual(`
+  });
+  const to = host.commit("after", {
+    "/middleware.ts": src`
+      export const middleware = (store) => (next) => (action) => {
+        audit(action);
+        return next(action);
+      };
+    `,
+  });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e middleware`);
+
+  expect(result.code).toBe(0);
+  expect(result.stdout).toContain(diffOutdent(`
       middleware(store)
     - ├─ log()
     + ├─ audit()
       └─ next()
-  `);
+  `));
 });

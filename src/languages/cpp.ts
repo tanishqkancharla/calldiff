@@ -401,7 +401,7 @@ function extractFromTree(
 
 export const cppExtractor: LanguageExtractor = {
   id: "cpp",
-  extensions: [".cc", ".cpp", ".cxx", ".hpp", ".hh"],
+  extensions: [".cc", ".cpp", ".cu", ".cuh", ".cxx", ".hpp", ".hh"],
   grammarPackage: "tree-sitter-cpp",
   extract: extractFromTree,
 };

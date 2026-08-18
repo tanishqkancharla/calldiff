@@ -1,59 +1,79 @@
-import { expect, test as vitestTest } from "vitest";
-import { extractFunctions } from "../src/extract.js";
-import type { FunctionInfo } from "../src/types.js";
-import { stepShape } from "./helpers.js";
+import { outdent } from "outdent";
+import { expect, test } from "vitest";
+import { workspace } from "./workspace.js";
 
-/** Call keys of a function's steps, in order (branches drop out as `false`). */
-function callKeys(fn: FunctionInfo | undefined): unknown[] {
-  return (fn?.steps ?? []).map((step) => step.type === "call" && step.key);
-}
+const src = outdent({ trimTrailingNewline: false });
 
-// tree-sitter reports `comment` as a NAMED child, so a concise arrow whose
-// expression is preceded by one has the comment sitting where the body is
-// looked for. Picking it makes the function report no calls at all.
+test("typescript: a line comment is not the arrow's body", () => {
+  const host = workspace({
+    "/src/handler.ts": src`
+      export const handler = (event) =>
+        // Read from context so this stays a drop-in combinator.
+        process(event)
+    `,
+  });
 
-vitestTest("typescript: a line comment is not the arrow's body", () => {
-  const [handler] = extractFunctions(
-    "src/handler.ts",
-    `export const handler = (event) =>
-       // Read from context so this stays a drop-in combinator.
-       process(event)`,
-  );
+  const result = host.run("calldiff tree -e handler");
 
-  expect(callKeys(handler)).toEqual(["process"]);
+  expect(result.code).toBe(0);
+  expect(result.stdout).toContain(src`
+    handler(event)
+    └─ process()
+  `.trimEnd());
 });
 
-vitestTest("typescript: a block comment is not the arrow's body", () => {
-  const [handler] = extractFunctions(
-    "src/handler.ts",
-    `export const handler = (event) => /* explain */ process(event)`,
-  );
+test("typescript: a block comment is not the arrow's body", () => {
+  const host = workspace({
+    "/src/handler.ts": src`
+      export const handler = (event) => /* explain */ process(event)
+    `,
+  });
 
-  expect(callKeys(handler)).toEqual(["process"]);
+  const result = host.run("calldiff tree -e handler");
+
+  expect(result.code).toBe(0);
+  expect(result.stdout).toContain(src`
+    handler(event)
+    └─ process()
+  `.trimEnd());
 });
 
-vitestTest("typescript: a comment inside a curried chain is not the body", () => {
-  const [traceRequest] = extractFunctions(
-    "src/aeTracer.ts",
-    `export const traceRequest =
-       <E, R>(options: Options<E, R>) =>
-       <A, E2>(effect: Effect.Effect<A, E2>): Effect.Effect<A, E2> =>
-         // The inbound request is read from context rather than passed in.
-         Effect.flatMap(currentRequest(), (request) => runTraced(request, effect))`,
-  );
+test("typescript: a comment inside a curried chain is not the body", () => {
+  const host = workspace({
+    "/src/aeTracer.ts": src`
+      export const traceRequest =
+        <E, R>(options: Options<E, R>) =>
+        <A, E2>(effect: Effect.Effect<A, E2>): Effect.Effect<A, E2> =>
+          // The inbound request is read from context rather than passed in.
+          Effect.flatMap(currentRequest(), (request) => runTraced(request, effect))
+    `,
+  });
 
-  expect(stepShape(traceRequest)).toBe(
-    ["Effect.flatMap", "  currentRequest", "  runTraced"].join("\n"),
-  );
+  const result = host.run("calldiff tree -e traceRequest");
+
+  expect(result.code).toBe(0);
+  expect(result.stdout).toContain(src`
+    traceRequest(options)
+    └─ Effect.flatMap()
+       ├─ currentRequest()
+       └─ runTraced()
+  `.trimEnd());
 });
 
-vitestTest("javascript: a line comment is not the arrow's body", () => {
-  const [handler] = extractFunctions(
-    "src/handler.js",
-    `export const handler = (event) =>
-       // explain
-       process(event)`,
-  );
+test("javascript: a line comment is not the arrow's body", () => {
+  const host = workspace({
+    "/src/handler.js": src`
+      export const handler = (event) =>
+        // explain
+        process(event)
+    `,
+  });
 
-  expect(callKeys(handler)).toEqual(["process"]);
+  const result = host.run("calldiff tree -e handler");
+
+  expect(result.code).toBe(0);
+  expect(result.stdout).toContain(src`
+    handler(event)
+    └─ process()
+  `.trimEnd());
 });

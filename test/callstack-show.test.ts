@@ -1,10 +1,13 @@
+import { outdent } from "outdent";
 import { describe, expect, test } from "vitest";
-import { callstackShow } from "./helpers.js";
+import { workspace } from "./workspace.js";
+
+const src = outdent({ trimTrailingNewline: false });
 
 describe("callstack tree", () => {
   test("renders a plain call tree without +/- markers", () => {
-    const actual = callstackShow(
-      `
+    const host = workspace({
+      "/file.ts": src`
         export class PiService {
           static createAgentSession(options: { sessionId?: string }) {
             const services = PiService.getServices();
@@ -44,29 +47,28 @@ describe("callstack tree", () => {
 
         function createCodingTools() {}
       `,
-      "PiService.createAgentSession",
-    );
+    });
 
-    expect(actual).toBe(
-      [
-        "PiService.createAgentSession(options)",
-        "├─ PiService.getServices()",
-        "│  ├─ SettingsManager.create()",
-        "│  ├─ AuthStorage.create()",
-        "│  ├─ new ModelRegistry()",
-        "│  └─ createCodingTools()",
-        "├─ services.boot()",
-        "├─ if (!options.sessionId)",
-        "   └─ SessionManager.create()",
-        "└─ else",
-        "   └─ SessionManager.open(_id)",
-      ].join("\n"),
-    );
+    const result = host.run("calldiff tree -e PiService.createAgentSession");
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain(src`
+      PiService.createAgentSession(options)
+      ├─ PiService.getServices()
+      │  ├─ SettingsManager.create()
+      │  ├─ AuthStorage.create()
+      │  ├─ new ModelRegistry()
+      │  └─ createCodingTools()
+      ├─ services.boot()
+      ├─ if (!options.sessionId)
+         └─ SessionManager.create()
+      └─ else
+         └─ SessionManager.open(_id)
+    `.trimEnd());
   });
 
   test("respects maxDepth", () => {
-    const actual = callstackShow(
-      `
+    const host = workspace({
+      "/file.ts": src`
         export function outer() {
           mid();
         }
@@ -78,10 +80,13 @@ describe("callstack tree", () => {
         }
         function leaf() {}
       `,
-      "outer",
-      { maxDepth: 1 },
-    );
+    });
 
-    expect(actual).toBe(["outer()", "└─ mid()"].join("\n"));
+    const result = host.run("calldiff tree -e outer --max-depth 1");
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain(src`
+      outer()
+      └─ mid()
+    `.trimEnd());
   });
 });

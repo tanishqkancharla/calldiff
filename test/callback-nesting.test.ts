@@ -1,159 +1,231 @@
-import { expect, test as vitestTest } from "vitest";
-import { extractFunctions } from "../src/extract.js";
-import type { CallStep, FunctionInfo } from "../src/types.js";
-import { test } from "./expectCallstack.js";
+import { outdent } from "outdent";
+import { expect, test } from "vitest";
+import { diffOutdent } from "./diff-outdent.js";
+import { workspace } from "./workspace.js";
 
-/**
- * Indented `key` per step, so nesting is visible in the assertion. Kotlin
- * already nests a trailing lambda's body under the call that receives it;
- * these pin the same shape for TypeScript and JavaScript.
- */
-function shape(fn: FunctionInfo | undefined): string {
-  const walk = (steps: CallStep[], depth: number): string[] =>
-    steps.flatMap((step) => [
-      `${"  ".repeat(depth)}${step.type === "call" ? step.key : step.label}`,
-      ...walk(step.children ?? [], depth + 1),
-    ]);
-  return walk(fn?.steps ?? [], 0).join("\n");
-}
+const src = outdent({ trimTrailingNewline: false });
 
-vitestTest("typescript: a callback body nests under the receiving call", () => {
-  const [boot] = extractFunctions(
-    "src/boot.ts",
-    `export function boot(items) {
-       items.map((item) => render(item))
-     }`,
-  );
+test("typescript: a callback body nests under the receiving call", () => {
+  const host = workspace({
+    "/src/boot.ts": src`
+      export function boot(items) {
+        items.map((item) => render(item))
+      }
+    `,
+  });
 
-  expect(shape(boot)).toBe(["items.map", "  render"].join("\n"));
+  const result = host.run("calldiff tree -e boot");
+
+  expect(result.code).toBe(0);
+  expect(result.stdout).toContain(src`
+    boot(items)
+    └─ items.map()
+       └─ render()
+  `.trimEnd());
 });
 
-vitestTest("typescript: argument calls nest under the call too", () => {
-  const [run] = extractFunctions(
-    "src/run.ts",
-    `export function run() {
-       withRetry(backoff(), () => fetchAll())
-     }`,
-  );
+test("typescript: argument calls nest under the call too", () => {
+  const host = workspace({
+    "/src/run.ts": src`
+      export function run() {
+        withRetry(backoff(), () => fetchAll())
+      }
+    `,
+  });
 
-  expect(shape(run)).toBe(
-    ["withRetry", "  backoff", "  fetchAll"].join("\n"),
-  );
+  const result = host.run("calldiff tree -e run");
+
+  expect(result.code).toBe(0);
+  expect(result.stdout).toContain(src`
+    run()
+    └─ withRetry()
+       ├─ backoff()
+       └─ fetchAll()
+  `.trimEnd());
 });
 
-vitestTest("typescript: nesting is transitive through a pipeline", () => {
-  const [traceRequest] = extractFunctions(
-    "src/aeTracer.ts",
-    `export const traceRequest = (options) => (effect) =>
-       Effect.flatMap(currentRequest(), (request) =>
-         Effect.flatMap(currentContext(), (context) =>
-           withTracer(effect, parentSpanFrom(request))))`,
-  );
+test("typescript: nesting is transitive through a pipeline", () => {
+  const host = workspace({
+    "/src/aeTracer.ts": src`
+      export const traceRequest = (options) => (effect) =>
+        Effect.flatMap(currentRequest(), (request) =>
+          Effect.flatMap(currentContext(), (context) =>
+            withTracer(effect, parentSpanFrom(request))))
+    `,
+  });
 
-  expect(shape(traceRequest)).toBe(
-    [
-      "Effect.flatMap",
-      "  currentRequest",
-      "  Effect.flatMap",
-      "    currentContext",
-      "    withTracer",
-      "      parentSpanFrom",
-    ].join("\n"),
-  );
+  const result = host.run("calldiff tree -e traceRequest");
+
+  expect(result.code).toBe(0);
+  expect(result.stdout).toContain(src`
+    traceRequest(options)
+    └─ Effect.flatMap()
+       ├─ currentRequest()
+       └─ Effect.flatMap()
+          ├─ currentContext()
+          └─ withTracer()
+             └─ parentSpanFrom()
+  `.trimEnd());
 });
 
-vitestTest("typescript: a branch inside a callback keeps its arm", () => {
-  const [boot] = extractFunctions(
-    "src/boot.ts",
-    `export function boot(items) {
-       items.forEach((item) => {
-         if (item.ready) {
-           render(item)
-         } else {
-           skip(item)
-         }
-       })
-     }`,
-  );
-
-  expect(shape(boot)).toBe(
-    [
-      "items.forEach",
-      "  if (item.ready)",
-      "    render",
-      "  else",
-      "    skip",
-    ].join("\n"),
-  );
-});
-
-vitestTest("typescript: a constructor callback nests as well", () => {
-  const [wait] = extractFunctions(
-    "src/wait.ts",
-    `export function wait() {
-       new Promise((resolve) => schedule(resolve))
-     }`,
-  );
-
-  expect(shape(wait)).toBe(["new Promise", "  schedule"].join("\n"));
-});
-
-vitestTest("typescript: a hoisted wrapper callback is not printed twice", () => {
-  // `handler` is registered as its own definition, so the tree expands it from
-  // the `handler()` call site. Nesting it under `defineEventHandler` too would
-  // show the same body twice.
-  const [boot] = extractFunctions(
-    "src/boot.ts",
-    `export function boot() {
-       const handler = defineEventHandler(async (event) => { chargeCard(event) })
-       handler()
-     }`,
-  );
-
-  expect(shape(boot)).toBe(["defineEventHandler", "handler"].join("\n"));
-});
-
-vitestTest("javascript: a callback body nests under the receiving call", () => {
-  const [boot] = extractFunctions(
-    "src/boot.js",
-    `export function boot(items) {
-       items.map((item) => render(item))
-     }`,
-  );
-
-  expect(shape(boot)).toBe(["items.map", "  render"].join("\n"));
-});
-
-vitestTest("tsx: an effect callback nests under useEffect", () => {
-  const [Panel] = extractFunctions(
-    "src/Panel.tsx",
-    `export function Panel() {
-       useEffect(() => { loadRows() }, [])
-       return <Rows />
-     }`,
-  );
-
-  expect(shape(Panel)).toBe(["useEffect", "  loadRows", "Rows"].join("\n"));
-});
-
-test("typescript: a change inside a callback shows where it happened", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
+test("typescript: a branch inside a callback keeps its arm", () => {
+  const host = workspace({
+    "/src/boot.ts": src`
       export function boot(items) {
         items.forEach((item) => {
-    -     render(item);
-    +     paint(item);
+          if (item.ready) {
+            render(item)
+          } else {
+            skip(item)
+          }
+        })
+      }
+    `,
+  });
+
+  const result = host.run("calldiff tree -e boot");
+
+  expect(result.code).toBe(0);
+  expect(result.stdout).toContain(src`
+    boot(items)
+    └─ items.forEach()
+       ├─ if (item.ready)
+          └─ render()
+       └─ else
+          └─ skip()
+  `.trimEnd());
+});
+
+test("typescript: a constructor callback nests as well", () => {
+  const host = workspace({
+    "/src/wait.ts": src`
+      export function wait() {
+        new Promise((resolve) => schedule(resolve))
+      }
+    `,
+  });
+
+  const result = host.run("calldiff tree -e wait");
+
+  expect(result.code).toBe(0);
+  expect(result.stdout).toContain(src`
+    wait()
+    └─ new Promise()
+       └─ schedule()
+  `.trimEnd());
+});
+
+test("typescript: a hoisted wrapper callback is not printed twice", () => {
+  const host = workspace({
+    "/src/boot.ts": src`
+      export function boot() {
+        const handler = defineEventHandler(async (event) => { chargeCard(event) })
+        handler()
+      }
+    `,
+  });
+
+  const result = host.run("calldiff tree -e boot");
+
+  expect(result.code).toBe(0);
+  expect(result.stdout).toContain(src`
+    boot()
+    ├─ defineEventHandler()
+    └─ handler(event)
+       └─ chargeCard()
+  `.trimEnd());
+});
+
+test("javascript: a callback body nests under the receiving call", () => {
+  const host = workspace({
+    "/src/boot.js": src`
+      export function boot(items) {
+        items.map((item) => render(item))
+      }
+    `,
+  });
+
+  const result = host.run("calldiff tree -e boot");
+
+  expect(result.code).toBe(0);
+  expect(result.stdout).toContain(src`
+    boot(items)
+    └─ items.map()
+       └─ render()
+  `.trimEnd());
+});
+
+test("tsx: an effect callback nests under useEffect", () => {
+  const host = workspace({
+    "/src/Panel.tsx": src`
+      export function Panel() {
+        useEffect(() => { loadRows() }, [])
+        return <Rows />
+      }
+    `,
+  });
+
+  const result = host.run("calldiff tree -e Panel");
+
+  expect(result.code).toBe(0);
+  expect(result.stdout).toContain(src`
+    Panel()
+    ├─ useEffect()
+    │  └─ loadRows()
+    └─ Rows()
+  `.trimEnd());
+});
+
+test("typescript: a change inside a callback shows where it happened", () => {
+  const host = workspace();
+  const from = host.commit("before", {
+    "/boot.ts": src`
+      export function boot(items) {
+        items.forEach((item) => {
+          render(item);
         });
       }
     `,
-    "boot",
-    { file: "boot.ts" },
-  ).toEqual(`
+  });
+  const to = host.commit("after", {
+    "/boot.ts": src`
+      export function boot(items) {
+        items.forEach((item) => {
+          paint(item);
+        });
+      }
+    `,
+  });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e boot`);
+
+  expect(result.code).toBe(0);
+  expect(result.stdout).toContain(diffOutdent(`
       boot(items)
       └─ items.forEach()
     -    ├─ render()
     +    └─ paint()
-  `);
+  `));
+});
+
+test("typescript: reach walks through callback nesting", () => {
+  const host = workspace({
+    "/src/aeTracer.ts": src`
+      export const traceRequest = (options) => (effect) =>
+        Effect.flatMap(currentRequest(), (request) =>
+          parentSpanFromRequest(request))
+
+      function parentSpanFromRequest(request) {
+        parseTraceparent(request.header)
+      }
+    `,
+  });
+
+  const result = host.run(
+    "calldiff reach -e traceRequest --to parseTraceparent",
+  );
+
+  expect(result.code).toBe(0);
+  expect(result.stdout).toContain("parseTraceparent");
+  expect(result.stdout).toContain("Effect.flatMap()");
 });

@@ -124,7 +124,7 @@ const pathsArg = z
 
 export const cli = Cli.create("calldiff", {
   description:
-    "Diff call stacks across git commits for agentic code review (22 languages)",
+    "Diff call stacks across git commits for agentic code review (23 languages)",
   version: readVersion(),
   hint: "Commands: diff (compare two trees), tree (view one tree), reach (paths between symbols). Path filters are trailing positionals (a leading -- is also accepted). Use --format json for structured agent output.",
   sync: {

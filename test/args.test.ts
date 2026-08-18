@@ -1,128 +1,138 @@
+import { outdent } from "outdent";
 import { describe, expect, test } from "vitest";
-import { cli, hasTokenFlag, normalizeArgv } from "../src/cli.js";
+import { workspace } from "./workspace.js";
 
-async function invoke(
-  argv: string[],
-): Promise<{ stdout: string; code: number | undefined }> {
-  let stdout = "";
-  let code: number | undefined;
-  // The default ASCII path writes to process.stdout itself, so capture both
-  // that and incur's injected writer.
-  const realWrite = process.stdout.write.bind(process.stdout);
-  process.stdout.write = ((chunk: unknown) => {
-    stdout += String(chunk);
-    return true;
-  }) as typeof process.stdout.write;
-  try {
-    await cli.serve(normalizeArgv(argv), {
-      stdout: (s) => {
-        stdout += s;
-      },
-      exit: (c) => {
-        code = c;
-      },
-    });
-  } finally {
-    process.stdout.write = realWrite;
-  }
-  return { stdout, code };
-}
+const src = outdent({ trimTrailingNewline: false });
 
-describe("normalizeArgv", () => {
-  test("strips lone -- separators", () => {
-    expect(normalizeArgv(["main", "feature", "--", "src"])).toEqual([
-      "main",
-      "feature",
-      "src",
-    ]);
-  });
-
-  test("leaves other tokens alone", () => {
-    expect(normalizeArgv(["tree", "-e", "boot"])).toEqual([
-      "tree",
-      "-e",
-      "boot",
-    ]);
-  });
-});
-
-describe("hasTokenFlag", () => {
-  test("detects each token flag", () => {
-    expect(hasTokenFlag(["tree", "--token-count"])).toBe(true);
-    expect(hasTokenFlag(["tree", "--token-limit", "50"])).toBe(true);
-    expect(hasTokenFlag(["tree", "--token-offset", "10"])).toBe(true);
-  });
-
-  test("detects the --flag=value form", () => {
-    expect(hasTokenFlag(["tree", "--token-limit=50"])).toBe(true);
-  });
-
-  test("is false without one", () => {
-    expect(hasTokenFlag(["tree", "-e", "boot"])).toBe(false);
-    expect(hasTokenFlag(["diff", "--max-depth", "3"])).toBe(false);
-  });
-});
-
-// Regression: these incur globals act on a command's return value, so the
-// ASCII fast path used to swallow them — `--token-limit` printed everything
-// and `--token-count` reported 0.
 describe("token flags in default ASCII mode", () => {
-  const entry = ["tree", "--entry", "buildCallTree"];
-
-  test("--token-count reports a real count", async () => {
-    const { stdout } = await invoke([...entry, "--token-count"]);
-    const count = Number(stdout.trim());
+  test("--token-count reports a real count", () => {
+    const host = workspace({
+      "/app.ts": src`
+        export function boot() {
+          load();
+          run();
+        }
+        function load() {}
+        function run() {}
+      `,
+    });
+    const result = host.run("calldiff tree -e boot --token-count");
+    expect(result.code).toBe(0);
+    const count = Number(result.stdout.trim());
     expect(Number.isInteger(count)).toBe(true);
     expect(count).toBeGreaterThan(0);
   });
 
-  test("--token-limit actually truncates", async () => {
-    const full = await invoke(entry);
-    const limited = await invoke([...entry, "--token-limit", "20"]);
+  test("--token-limit actually truncates", () => {
+    const host = workspace({
+      "/app.ts": src`
+        export function boot() {
+          load();
+          run();
+        }
+        function load() {}
+        function run() {}
+      `,
+    });
+    const limited = host.run("calldiff tree -e boot --token-limit 5");
+    expect(limited.code).toBe(0);
     expect(limited.stdout).toMatch(/truncated: showing tokens/);
-    expect(limited.stdout.length).toBeLessThan(full.stdout.length);
+    expect(limited.stdout).not.toContain("run()");
   });
 
-  test("output is unchanged without the flags", async () => {
-    const { stdout } = await invoke(entry);
-    expect(stdout).toMatch(/buildCallTree/);
-    expect(stdout).not.toMatch(/truncated: showing tokens/);
+  test("output is unchanged without the flags", () => {
+    const host = workspace({
+      "/app.ts": src`
+        export function boot() {
+          load();
+        }
+        function load() {}
+      `,
+    });
+    const result = host.run("calldiff tree -e boot");
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("boot()");
+    expect(result.stdout).not.toMatch(/truncated: showing tokens/);
+  });
+
+  test("--token-offset skips the start of the output", () => {
+    const host = workspace({
+      "/app.ts": src`
+        export function boot() {
+          load();
+          run();
+        }
+        function load() {}
+        function run() {}
+      `,
+    });
+    const result = host.run("calldiff tree -e boot --token-offset 5");
+    expect(result.code).toBe(0);
+    expect(result.stdout).not.toContain("calldiff tree working tree");
   });
 });
 
-describe("calldiff CLI (incur)", () => {
-  test("--help exits successfully and mentions subcommands", async () => {
-    const { stdout, code } = await invoke(["--help"]);
-    expect(code === undefined || code === 0).toBe(true);
-    expect(stdout).toMatch(/calldiff/);
-    expect(stdout).toMatch(/diff/);
-    expect(stdout).toMatch(/tree/);
-    expect(stdout).toMatch(/reach/);
+describe("calldiff CLI", () => {
+  test("--help exits successfully and mentions subcommands", () => {
+    const host = workspace();
+    const result = host.run("calldiff --help");
+    expect(result.code).toBe(0);
+    expect(result.stdout).toMatch(/calldiff/);
+    expect(result.stdout).toMatch(/diff/);
+    expect(result.stdout).toMatch(/tree/);
+    expect(result.stdout).toMatch(/reach/);
   });
 
-  test("--llms prints agent manifest", async () => {
-    const { stdout, code } = await invoke(["--llms"]);
-    expect(code === undefined || code === 0).toBe(true);
-    expect(stdout).toMatch(/calldiff/);
-    expect(stdout).toMatch(/tree/);
-    expect(stdout).toMatch(/reach/);
+  test("--llms prints agent manifest", () => {
+    const host = workspace();
+    const result = host.run("calldiff --llms");
+    expect(result.code).toBe(0);
+    expect(result.stdout).toMatch(/calldiff/);
+    expect(result.stdout).toMatch(/tree/);
+    expect(result.stdout).toMatch(/reach/);
   });
 
-  test("tree without --entry fails", async () => {
-    const { code } = await invoke(["tree"]);
-    expect(code).toBeTruthy();
-    expect(code).toBeGreaterThan(0);
+  test("tree without --entry fails", () => {
+    const host = workspace();
+    const result = host.run("calldiff tree");
+    expect(result.code).toBeGreaterThan(0);
+    expect(`${result.stdout}\n${result.stderr}`).toMatch(/--entry/);
   });
 
-  test("reach without --to fails", async () => {
-    const { code } = await invoke(["reach", "-e", "boot"]);
-    expect(code).toBeTruthy();
-    expect(code).toBeGreaterThan(0);
+  test("reach without --to fails", () => {
+    const host = workspace({
+      "/app.ts": src`
+        export function boot() {}
+      `,
+    });
+    const result = host.run("calldiff reach -e boot");
+    expect(result.code).toBeGreaterThan(0);
   });
 
-  test("unknown flag fails", async () => {
-    const { code } = await invoke(["--not-a-real-flag"]);
-    expect(code).toBeTruthy();
-    expect(code).toBeGreaterThan(0);
+  test("unknown flag fails", () => {
+    const host = workspace();
+    const result = host.run("calldiff --not-a-real-flag");
+    expect(result.code).toBeGreaterThan(0);
+  });
+
+  test("strips lone -- separators so path filters still work", () => {
+    const host = workspace({
+      "/src/app.ts": src`
+        export function boot() {
+          run();
+        }
+        function run() {}
+      `,
+      "/other/decoy.ts": src`
+        export function decoy() {
+          boom();
+        }
+        function boom() {}
+      `,
+    });
+    const result = host.run("calldiff tree -e boot -- src");
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("run()");
+    expect(result.stdout).not.toContain("decoy()");
   });
 });

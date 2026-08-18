@@ -1,7 +1,7 @@
 {
   "name": "calldiff",
   "version": "0.6.0",
-  "description": "Diff call stacks across git commits for agentic code review (22 languages)",
+  "description": "Diff call stacks across git commits for agentic code review (23 languages)",
   "type": "module",
   "exports": {
     ".": {

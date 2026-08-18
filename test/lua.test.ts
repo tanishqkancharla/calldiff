@@ -1,37 +1,62 @@
-import { test } from "./expectCallstack.js";
+import { outdent } from "outdent";
+import { expect, test } from "vitest";
+import { diffOutdent } from "./diff-outdent.js";
+import { workspace } from "./workspace.js";
 
-test("lua: refactors calls into a helper with if/else", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
-      function create_agent_session(options)
-    -   AuthStorage.create()
-    -   create_coding_tools()
-    +   local services = get_services()
-    +   services:boot()
-        if options.session_id == nil then
-          SessionManager.create()
-        else
-          SessionManager.open(options.session_id)
-        end
-      end
+const src = outdent({ trimTrailingNewline: false });
 
-    + function get_services()
-    +   AuthStorage.create()
-    +   create_coding_tools()
-    + end
-
-      function create_coding_tools() end
-
-      function SessionManager.create() end
-      function SessionManager.open(id) end
-      function AuthStorage.create() end
-    + function Services:boot() end
+test("lua: refactors calls into a helper with if/else", () => {
+  const host = workspace();
+  const from = host.commit("before", {
+    "/pi.lua": src`
+       function create_agent_session(options)
+         AuthStorage.create()
+         create_coding_tools()
+         if options.session_id == nil then
+           SessionManager.create()
+         else
+           SessionManager.open(options.session_id)
+         end
+       end
+      
+      
+       function create_coding_tools() end
+      
+       function SessionManager.create() end
+       function SessionManager.open(id) end
+       function AuthStorage.create() end
     `,
-    "create_agent_session",
-    { file: "pi.lua" },
-  ).toEqual(`
+  });
+  const to = host.commit("after", {
+    "/pi.lua": src`
+       function create_agent_session(options)
+         local services = get_services()
+         services:boot()
+         if options.session_id == nil then
+           SessionManager.create()
+         else
+           SessionManager.open(options.session_id)
+         end
+       end
+      
+       function get_services()
+         AuthStorage.create()
+         create_coding_tools()
+       end
+      
+       function create_coding_tools() end
+      
+       function SessionManager.create() end
+       function SessionManager.open(id) end
+       function AuthStorage.create() end
+       function Services:boot() end
+    `,
+  });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e create_agent_session`);
+
+  expect(result.code).toBe(0);
+  expect(result.stdout).toContain(diffOutdent(`
       create_agent_session(options)
     - ├─ AuthStorage.create()
     - ├─ create_coding_tools()
@@ -43,105 +68,173 @@ test("lua: refactors calls into a helper with if/else", ({
          └─ SessionManager.create()
       └─ else
          └─ SessionManager.open(id)
-  `);
+  `));
 });
 
-test("lua: self:method resolves to Type.method", ({ expectCallstack }) => {
-  expectCallstack(
-    `
-      function Runner:start()
-        self:prepare()
-    +   self:validate()
-        self:run()
-      end
-
-      function Runner:prepare() end
-    + function Runner:validate() end
-      function Runner:run() end
+test("lua: self:method resolves to Type.method", () => {
+  const host = workspace();
+  const from = host.commit("before", {
+    "/runner.lua": src`
+       function Runner:start()
+         self:prepare()
+         self:run()
+       end
+      
+       function Runner:prepare() end
+       function Runner:run() end
     `,
-    "Runner.start",
-    { file: "runner.lua" },
-  ).toEqual(`
+  });
+  const to = host.commit("after", {
+    "/runner.lua": src`
+       function Runner:start()
+         self:prepare()
+         self:validate()
+         self:run()
+       end
+      
+       function Runner:prepare() end
+       function Runner:validate() end
+       function Runner:run() end
+    `,
+  });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e Runner.start`);
+
+  expect(result.code).toBe(0);
+  expect(result.stdout).toContain(diffOutdent(`
       Runner.start()
       ├─ Runner.prepare()
     + ├─ Runner.validate()
       └─ Runner.run()
-  `);
+  `));
 });
 
-test("lua: Thing:new expands like a constructor", ({ expectCallstack }) => {
-  expectCallstack(
-    `
-      function make()
-        Thing:new()
-      end
-      function Thing:new()
-        init()
-    +   ready()
-      end
-      function init() end
-    + function ready() end
+test("lua: Thing:new expands like a constructor", () => {
+  const host = workspace();
+  const from = host.commit("before", {
+    "/ctor.lua": src`
+       function make()
+         Thing:new()
+       end
+       function Thing:new()
+         init()
+       end
+       function init() end
     `,
-    "make",
-    { file: "ctor.lua" },
-  ).toEqual(`
+  });
+  const to = host.commit("after", {
+    "/ctor.lua": src`
+       function make()
+         Thing:new()
+       end
+       function Thing:new()
+         init()
+         ready()
+       end
+       function init() end
+       function ready() end
+    `,
+  });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e make`);
+
+  expect(result.code).toBe(0);
+  expect(result.stdout).toContain(diffOutdent(`
       make()
       └─ Thing.new()
          ├─ init()
     +    └─ ready()
-  `);
+  `));
 });
 
-test("lua: skips nested local functions and closures", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
-      function outer()
-        local function nested()
-          hidden()
-        end
-        local f = function()
-          also_hidden()
-        end
-        visible()
-    +   also_visible()
-      end
-      function hidden() end
-      function also_hidden() end
-      function visible() end
-    + function also_visible() end
+test("lua: skips nested local functions and closures", () => {
+  const host = workspace();
+  const from = host.commit("before", {
+    "/nested.lua": src`
+       function outer()
+         local function nested()
+           hidden()
+         end
+         local f = function()
+           also_hidden()
+         end
+         visible()
+       end
+       function hidden() end
+       function also_hidden() end
+       function visible() end
     `,
-    "outer",
-    { file: "nested.lua" },
-  ).toEqual(`
+  });
+  const to = host.commit("after", {
+    "/nested.lua": src`
+       function outer()
+         local function nested()
+           hidden()
+         end
+         local f = function()
+           also_hidden()
+         end
+         visible()
+         also_visible()
+       end
+       function hidden() end
+       function also_hidden() end
+       function visible() end
+       function also_visible() end
+    `,
+  });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e outer`);
+
+  expect(result.code).toBe(0);
+  expect(result.stdout).toContain(diffOutdent(`
       outer()
       ├─ visible()
     + └─ also_visible()
-  `);
+  `));
 });
 
-test("lua: elseif chains", ({ expectCallstack }) => {
-  expectCallstack(
-    `
-      function handle(status)
-        if status == "a" then
-          do_a()
-        elseif status == "b" then
-          do_b()
-    +     do_extra()
-        else
-          do_other()
-        end
-      end
-      function do_a() end
-      function do_b() end
-    + function do_extra() end
-      function do_other() end
+test("lua: elseif chains", () => {
+  const host = workspace();
+  const from = host.commit("before", {
+    "/elif.lua": src`
+       function handle(status)
+         if status == "a" then
+           do_a()
+         elseif status == "b" then
+           do_b()
+         else
+           do_other()
+         end
+       end
+       function do_a() end
+       function do_b() end
+       function do_other() end
     `,
-    "handle",
-    { file: "elif.lua" },
-  ).toEqual(`
+  });
+  const to = host.commit("after", {
+    "/elif.lua": src`
+       function handle(status)
+         if status == "a" then
+           do_a()
+         elseif status == "b" then
+           do_b()
+           do_extra()
+         else
+           do_other()
+         end
+       end
+       function do_a() end
+       function do_b() end
+       function do_extra() end
+       function do_other() end
+    `,
+  });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e handle`);
+
+  expect(result.code).toBe(0);
+  expect(result.stdout).toContain(diffOutdent(`
       handle(status)
       ├─ if status == "a"
          └─ do_a()
@@ -150,33 +243,49 @@ test("lua: elseif chains", ({ expectCallstack }) => {
     +    └─ do_extra()
       └─ else
          └─ do_other()
-  `);
+  `));
 });
 
-test("lua: colon and dot method calls both resolve to Type.method", ({
-  expectCallstack,
-}) => {
-  expectCallstack(
-    `
-      function boot(obj)
-        obj:method()
-        obj.method()
-        Thing.static()
-    +   Thing:extra()
-      end
-      function Thing:method() end
-      function Thing.static()
-        work()
-      end
-    + function Thing:extra()
-    +   more()
-    + end
-      function work() end
-    + function more() end
+test("lua: colon and dot method calls both resolve to Type.method", () => {
+  const host = workspace();
+  const from = host.commit("before", {
+    "/colon.lua": src`
+       function boot(obj)
+         obj:method()
+         obj.method()
+         Thing.static()
+       end
+       function Thing:method() end
+       function Thing.static()
+         work()
+       end
+       function work() end
     `,
-    "boot",
-    { file: "colon.lua" },
-  ).toEqual(`
+  });
+  const to = host.commit("after", {
+    "/colon.lua": src`
+       function boot(obj)
+         obj:method()
+         obj.method()
+         Thing.static()
+         Thing:extra()
+       end
+       function Thing:method() end
+       function Thing.static()
+         work()
+       end
+       function Thing:extra()
+         more()
+       end
+       function work() end
+       function more() end
+    `,
+  });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e boot`);
+
+  expect(result.code).toBe(0);
+  expect(result.stdout).toContain(diffOutdent(`
       boot(obj)
       ├─ obj.method()
       ├─ obj.method()
@@ -184,32 +293,47 @@ test("lua: colon and dot method calls both resolve to Type.method", ({
       │  └─ work()
     + └─ Thing.extra()
     +    └─ more()
-  `);
+  `));
 });
 
-test("lua: dotted Type.method definitions expand", ({ expectCallstack }) => {
-  expectCallstack(
-    `
-      function boot()
-        AuthStorage.create()
-    +   AuthStorage.reset()
-      end
-      function AuthStorage.create()
-        load()
-      end
-    + function AuthStorage.reset()
-    +   clear()
-    + end
-      function load() end
-    + function clear() end
+test("lua: dotted Type.method definitions expand", () => {
+  const host = workspace();
+  const from = host.commit("before", {
+    "/static.lua": src`
+       function boot()
+         AuthStorage.create()
+       end
+       function AuthStorage.create()
+         load()
+       end
+       function load() end
     `,
-    "boot",
-    { file: "static.lua" },
-  ).toEqual(`
+  });
+  const to = host.commit("after", {
+    "/static.lua": src`
+       function boot()
+         AuthStorage.create()
+         AuthStorage.reset()
+       end
+       function AuthStorage.create()
+         load()
+       end
+       function AuthStorage.reset()
+         clear()
+       end
+       function load() end
+       function clear() end
+    `,
+  });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e boot`);
+
+  expect(result.code).toBe(0);
+  expect(result.stdout).toContain(diffOutdent(`
       boot()
       ├─ AuthStorage.create()
       │  └─ load()
     + └─ AuthStorage.reset()
     +    └─ clear()
-  `);
+  `));
 });

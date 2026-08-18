@@ -1,6 +1,6 @@
 # calldiff
 
-`calldiff` is a CLI for agentic code review: it diffs call stacks across git commits for 22 languages (AST-based, powered by tree-sitter). See `README.md` for usage and `## Dev` for the dev command.
+`calldiff` is a CLI for agentic code review: it diffs call stacks across git commits for 23 languages (AST-based, powered by tree-sitter). See `README.md` for usage and `## Dev` for the dev command.
 
 ## Cursor Cloud specific instructions
 
