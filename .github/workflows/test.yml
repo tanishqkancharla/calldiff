@@ -1,0 +1,69 @@
+# Runs npm test on a PR only after the repo owner submits an Approve review.
+# New commits after that do not re-run until you approve again.
+#
+# GitHub does not let you approve your own PR. For those, use
+# Actions → Test → Run workflow (optionally pass a PR number).
+name: Test
+
+on:
+  pull_request_review:
+    types: [submitted]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: PR number to test (empty = the selected branch)
+        required: false
+
+concurrency:
+  group: test-${{ github.event.inputs.pr || github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  test:
+    name: npm test
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event.review.state == 'approved' &&
+        github.event.review.user.login == github.repository_owner &&
+        github.event.pull_request.state == 'open'
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Resolve checkout ref
+        id: checkout
+        env:
+          PR: ${{ github.event.inputs.pr || github.event.pull_request.number }}
+        run: |
+          if [ -n "$PR" ]; then
+            echo "ref=refs/pull/${PR}/head" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.checkout.outputs.ref }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - run: npm ci
+
+      - uses: actions/cache@v4
+        with:
+          path: /tmp/calldiff-grammar-cache
+          key: grammars-${{ runner.os }}-${{ hashFiles('package-lock.json', 'src/languages/grammars.ts') }}
+          restore-keys: |
+            grammars-${{ runner.os }}-
+
+      - run: npm run build
+      - run: npm test
