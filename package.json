@@ -20,10 +20,11 @@
     "prepublishOnly": "npm run build",
     "dev": "tsx src/cli.ts",
     "start": "node dist/cli.js",
+    "lint": "oxlint",
     "test": "vitest run"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=22.18.0"
   },
   "repository": {
     "type": "git",
@@ -59,8 +60,10 @@
     }
   },
   "devDependencies": {
+    "@oxlint/plugins": "^1.79.0",
     "@types/node": "^24.2.0",
     "outdent": "^0.8.0",
+    "oxlint": "^1.79.0",
     "tsx": "^4.20.3",
     "typescript": "^5.9.2",
     "vitest": "^4.1.10"

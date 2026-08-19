@@ -9,12 +9,34 @@ import {
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+/**
+ * Loaded tree-sitter grammar package surface.
+ * Named exports (`typescript`, `tsx`, …) are looked up by `resolveLanguage`.
+ */
 export type GrammarModule = {
-  language?: unknown;
+  language?: GrammarModule;
   typescript?: GrammarModule;
   tsx?: GrammarModule;
-  [key: string]: unknown;
+  [exportName: string]: GrammarModule | undefined;
 };
+
+/** Runtime grammar handle passed to `parser.setLanguage`. */
+export type GrammarLanguage = GrammarModule;
+
+type NativeBinding = GrammarModule & {
+  nodeTypeInfo?: object;
+};
+
+type NodeGypBuild = (root: string) => GrammarModule;
+
+type PackageJson = {
+  version?: string;
+};
+
+function errnoCode(err: Error): string | undefined {
+  // SAFETY: Node require/fs failures are ErrnoException with optional string code.
+  return (err as NodeJS.ErrnoException).code;
+}
 
 /** On-disk cache of npm-installed tree-sitter grammar packages. */
 export function grammarCacheDir(): string {
@@ -51,12 +73,11 @@ function ensureCachePackageJson(cacheDir: string): void {
 function loadNativeBinding(packageRoot: string): GrammarModule | null {
   try {
     const require = createRequire(join(packageRoot, "package.json"));
-    const gypBuild = require("node-gyp-build") as (
-      root: string,
-    ) => GrammarModule;
-    const binding = gypBuild(packageRoot);
+    // SAFETY: node-gyp-build's default export is (root) => native binding.
+    const gypBuild = require("node-gyp-build") as NodeGypBuild;
+    const binding: NativeBinding = gypBuild(packageRoot);
     try {
-      (binding as { nodeTypeInfo?: unknown }).nodeTypeInfo = require(
+      binding.nodeTypeInfo = require(
         join(packageRoot, "src", "node-types.json"),
       );
     } catch {
@@ -74,9 +95,10 @@ function requireGrammar(
   packageRoot: string,
 ): GrammarModule {
   try {
+    // SAFETY: grammar packages export a module compatible with GrammarModule.
     return require(npmPackage) as GrammarModule;
   } catch (err) {
-    const code = (err as NodeJS.ErrnoException)?.code;
+    const code = err instanceof Error ? errnoCode(err) : undefined;
     const msg = err instanceof Error ? err.message : String(err);
     if (
       code === "ERR_REQUIRE_ASYNC_MODULE" ||
@@ -89,13 +111,17 @@ function requireGrammar(
   }
 }
 
-/** Packages that need a pinned install spec (latest breaks createRequire). */
-const INSTALL_SPEC: Record<string, string> = {
-  "tree-sitter-c-sharp": "tree-sitter-c-sharp@0.23.1",
-  // 0.4+ is ESM-with-TLA; 0.2.0 is CJS and loads via createRequire.
-  "@tree-sitter-grammars/tree-sitter-lua":
-    "@tree-sitter-grammars/tree-sitter-lua@0.2.0",
-};
+function installSpecFor(npmPackage: string): string {
+  switch (npmPackage) {
+    case "tree-sitter-c-sharp":
+      return "tree-sitter-c-sharp@0.23.1";
+    case "@tree-sitter-grammars/tree-sitter-lua":
+      // 0.4+ is ESM-with-TLA; 0.2.0 is CJS and loads via createRequire.
+      return "@tree-sitter-grammars/tree-sitter-lua@0.2.0";
+    default:
+      return npmPackage;
+  }
+}
 
 /**
  * Install an npm grammar package into the shared cache if missing, then require it.
@@ -106,9 +132,10 @@ export function loadGrammarPackage(npmPackage: string): GrammarModule {
   try {
     const localRequire = createRequire(import.meta.url);
     try {
+      // SAFETY: local dependency resolves to a tree-sitter grammar module.
       return localRequire(npmPackage) as GrammarModule;
     } catch (err) {
-      const code = (err as NodeJS.ErrnoException)?.code;
+      const code = err instanceof Error ? errnoCode(err) : undefined;
       const msg = err instanceof Error ? err.message : String(err);
       if (
         code === "ERR_REQUIRE_ASYNC_MODULE" ||
@@ -128,7 +155,6 @@ export function loadGrammarPackage(npmPackage: string): GrammarModule {
   const cacheDir = grammarCacheDir();
   if (!packageInstalled(cacheDir, npmPackage)) {
     ensureCachePackageJson(cacheDir);
-    const installSpec = INSTALL_SPEC[npmPackage] ?? npmPackage;
     execFileSync(
       "npm",
       [
@@ -139,7 +165,7 @@ export function loadGrammarPackage(npmPackage: string): GrammarModule {
         "--no-fund",
         "--no-audit",
         "--legacy-peer-deps",
-        installSpec,
+        installSpecFor(npmPackage),
       ],
       {
         stdio: ["ignore", "pipe", "pipe"],
@@ -157,7 +183,7 @@ export function loadGrammarPackage(npmPackage: string): GrammarModule {
 export function resolveLanguage(
   mod: GrammarModule,
   exportName?: string,
-): unknown {
+): GrammarLanguage {
   if (exportName) {
     const named = mod[exportName];
     if (named != null) return named;
@@ -173,10 +199,10 @@ export function readCachedPackageVersion(
   const pkgJson = join(cacheDir, "node_modules", npmPackage, "package.json");
   if (!existsSync(pkgJson)) return null;
   try {
-    const raw = JSON.parse(readFileSync(pkgJson, "utf8")) as {
-      version?: string;
-    };
-    return raw.version ?? null;
+    const raw: unknown = JSON.parse(readFileSync(pkgJson, "utf8"));
+    // SAFETY: npm package.json is JSON with an optional string version field.
+    const pkg = raw as PackageJson;
+    return pkg.version ?? null;
   } catch {
     return null;
   }

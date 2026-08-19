@@ -6,7 +6,8 @@
 
 - This is a single Node.js CLI package (npm, `package-lock.json`). Node `>=22` is required (incur); the VM's default Node satisfies this.
 - Standard commands live in `package.json` `scripts`:
-  - Typecheck/build: `npm run build` (runs `tsc`, emits `dist/`). There is no separate lint tool — `tsc` under `strict` is the closest thing to a lint check.
+  - Typecheck/build: `npm run build` (runs `tsc`, emits `dist/`).
+  - Lint: `npm run lint` (`oxlint` with vendored anti-slop rules in `tools/oxlint/anti-slop/`). Requires Node `>=22.18.0` so Oxlint can load the TypeScript plugin.
   - Tests: `npm test` (`vitest run`).
   - Run in dev: `npm run dev -- <args>` (runs `src/cli.ts` via `tsx`); run built binary: `node dist/cli.js <args>`.
-- The tool operates on a git repository, so run it from inside one. A convenient smoke test is to diff this repo's own two commits, e.g. `npm run dev -- diff f007467 99a6c6d`, which prints an ASCII callstack diff. Subcommands: `diff`, `tree`, `reach`.
+  - The tool operates on a git repository, so run it from inside one. A convenient smoke test is to diff this repo's own two commits, e.g. `npm run dev -- diff f007467 99a6c6d`, which prints an ASCII callstack diff. Subcommands: `diff`, `tree`, `reach`.

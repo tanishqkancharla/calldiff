@@ -48,7 +48,7 @@ function getParamsLabel(params: SyntaxNode | null): string {
   return names.length === 0 ? "()" : `(${names.join(", ")})`;
 }
 
-function calleeKey(node: SyntaxNode, className: string | null): string | null {
+function calleeKey(node: SyntaxNode, _className: string | null): string | null {
   // Bare / qualified function call callee is usually `name` or `qualified_name`
   if (node.type === "name") return node.text;
   if (node.type === "qualified_name") {

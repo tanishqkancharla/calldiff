@@ -73,6 +73,7 @@ function renderAsciiTree(
     if (!showLocs) return "";
     const loc = pickLoc(node);
     if (!loc.file || loc.line == null) return "";
+    // SAFETY: file and line were just validated as present above.
     const text = `  ${formatSourceLoc(loc as SourceLoc)}`;
     return useColor ? pc.dim(text) : text;
   };

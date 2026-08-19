@@ -2,7 +2,12 @@ import { execFileSync } from "node:child_process";
 import { existsSync, lstatSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { listSupportedExtensions } from "./languages/registry.js";
-import type { Snapshot } from "./types.js";
+import type {
+  Snapshot,
+  SnapshotPair,
+  SnapshotPairWithPaths,
+  SnapshotWithPaths,
+} from "./types.js";
 
 function gitBuffer(
   cwd: string,
@@ -33,7 +38,7 @@ export function assertGitRepo(cwd: string): void {
 export function resolveSnapshots(
   from: string | undefined,
   to: string | undefined,
-): { from: Snapshot; to: Snapshot } {
+): SnapshotPair {
   // git-diff defaults: no args → HEAD vs worktree; one arg → that vs worktree
   const left: Snapshot = {
     kind: "commit",
@@ -73,7 +78,7 @@ export function resolveDiffSnapshotsAndPaths(
   from: string | undefined,
   to: string | undefined,
   paths: string[],
-): { from: Snapshot; to: Snapshot; paths: string[] } {
+): SnapshotPairWithPaths {
   if (from === undefined && to === undefined) {
     return { ...resolveSnapshots(undefined, undefined), paths };
   }
@@ -125,7 +130,7 @@ export function resolveSnapshotAndPaths(
   cwd: string,
   ref: string | undefined,
   paths: string[],
-): { snapshot: Snapshot; paths: string[] } {
+): SnapshotWithPaths {
   if (ref === undefined) {
     return { snapshot: resolveSnapshot(undefined), paths };
   }

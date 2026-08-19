@@ -9,9 +9,13 @@ import {
   resolveEntrypointFile,
 } from "./calltree.js";
 import { diffTrees, treeHasChanges } from "./diff.js";
-import type { DiffNode, FunctionInfo } from "./types.js";
+import type { CallNode, DiffNode, FunctionInfo } from "./types.js";
 
-function functionShape(fn: FunctionInfo | undefined): string | null {
+function emptyCallTree(key: string, label: string): CallNode {
+  return { key, label, children: [] };
+}
+
+function functionFingerprint(fn: FunctionInfo | undefined): string | null {
   if (!fn) return null;
   return JSON.stringify({ label: fn.label, steps: fn.steps });
 }
@@ -46,7 +50,7 @@ function findAffected(
   const queue: string[] = [];
 
   for (const key of keys) {
-    if (functionShape(before.get(key)) === functionShape(after.get(key))) {
+    if (functionFingerprint(before.get(key)) === functionFingerprint(after.get(key))) {
       continue;
     }
     distance.set(key, 0);
@@ -192,19 +196,11 @@ export function diffEntry(
 
   const beforeTree = hasBefore
     ? buildCallTree(beforeKey, before, maxDepth)
-    : {
-        key: afterKey,
-        label: after.get(afterKey)?.label ?? afterKey,
-        children: [] as [],
-      };
+    : emptyCallTree(afterKey, after.get(afterKey)?.label ?? afterKey);
 
   const afterTree = hasAfter
     ? buildCallTree(afterKey, after, maxDepth)
-    : {
-        key: beforeKey,
-        label: before.get(beforeKey)?.label ?? beforeKey,
-        children: [] as [],
-      };
+    : emptyCallTree(beforeKey, before.get(beforeKey)?.label ?? beforeKey);
 
   if (!hasBefore && hasAfter) {
     const diff = diffTrees(
@@ -241,19 +237,11 @@ export function diffPinnedEntry(
 
   const beforeTree = beforeInfo
     ? buildCallTreeFromInfo(beforeInfo, before, maxDepth)
-    : {
-        key,
-        label: afterInfo?.label ?? key,
-        children: [] as [],
-      };
+    : emptyCallTree(key, afterInfo?.label ?? key);
 
   const afterTree = afterInfo
     ? buildCallTreeFromInfo(afterInfo, after, maxDepth)
-    : {
-        key,
-        label: beforeInfo?.label ?? key,
-        children: [] as [],
-      };
+    : emptyCallTree(key, beforeInfo?.label ?? key);
 
   if (!beforeInfo && afterInfo) {
     const diff = diffTrees(
