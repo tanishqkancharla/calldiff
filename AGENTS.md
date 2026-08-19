@@ -11,3 +11,9 @@
   - Tests: `npm test` (`vitest run`).
   - Run in dev: `npm run dev -- <args>` (runs `src/cli.ts` via `tsx`); run built binary: `node dist/cli.js <args>`.
   - The tool operates on a git repository, so run it from inside one. A convenient smoke test is to diff this repo's own two commits, e.g. `npm run dev -- diff f007467 99a6c6d`, which prints an ASCII callstack diff. Subcommands: `diff`, `tree`, `reach`.
+
+## Tests
+
+UX-facing changes always get end-to-end tests. If the change affects what `tree`, `reach`, or `diff` print, or a flag/option agents and humans pass, cover it by driving the CLI — not by unit-testing `extractFunctions` / `buildCallTree` / `findReachPaths` as a stand-in.
+
+Use the `workspace()` fixture in `test/workspace.ts` for those tests. It creates an isolated git repo; `host.run("calldiff ...")` returns `{ stdout, stderr, code }`. Assert the ASCII (or `--format json`) the user would see. Language extractors already follow this in `test/<id>.test.ts`; CLI behavior lives in files like `test/reach.test.ts` and `test/callback-nesting.test.ts`. The fixture's docstring has a copy-paste example.
