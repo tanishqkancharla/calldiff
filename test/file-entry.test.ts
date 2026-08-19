@@ -1,109 +1,62 @@
 import { describe, expect, test } from "vitest";
 import { outdent } from "outdent";
-import {
-  matchEntrypointFiles,
-  resolveEntrypointFile,
-  resolveFileEntrypoints,
-} from "../src/calltree.js";
-import { buildIndex } from "../src/extract.js";
-import { resolveExplicitDiffEntries } from "../src/infer.js";
-import type { FunctionInfo } from "../src/types.js";
 import { workspace } from "./workspace.js";
 
 const src = outdent({ trimTrailingNewline: false });
 
-function fn(
-  key: string,
-  file: string,
-  calls: string[] = [],
-  exported = true,
-): FunctionInfo {
-  return {
-    key,
-    label: `${key}()`,
-    file,
-    steps: calls.map((call) => ({ type: "call", key: call })),
-    exported,
-    start: 0,
-    end: 1,
-  };
-}
+describe("CLI --file entrypoints", () => {
+  test("tree --file matches a unique path suffix", () => {
+    const host = workspace({
+      "/packages/api/src/boot.ts": src`
+        export function boot() {
+          run();
+        }
+        function run() {}
+      `,
+    });
 
-describe("file entrypoint matching", () => {
-  test("prefers exact paths then unique suffixes", () => {
-    expect(
-      matchEntrypointFiles("src/routes.ts", [
-        "src/routes.ts",
-        "packages/api/src/routes.ts",
-      ]),
-    ).toEqual(["src/routes.ts"]);
-
-    expect(
-      matchEntrypointFiles("routes.ts", [
-        "packages/api/src/routes.ts",
-      ]),
-    ).toEqual(["packages/api/src/routes.ts"]);
+    const result = host.run("calldiff tree --file boot.ts");
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("boot()");
+    expect(result.stdout).toContain("run()");
   });
 
-  test("lists every ambiguous suffix match", () => {
-    expect(
-      matchEntrypointFiles("routes.ts", [
-        "packages/a/src/routes.ts",
-        "packages/b/src/routes.ts",
-      ]),
-    ).toEqual(["packages/a/src/routes.ts", "packages/b/src/routes.ts"]);
+  test("tree --file prefers an exact path over a suffix", () => {
+    const host = workspace({
+      "/src/routes.ts": src`
+        export function exact() {
+          fromExact();
+        }
+        function fromExact() {}
+      `,
+      "/packages/api/src/routes.ts": src`
+        export function nested() {
+          fromNested();
+        }
+        function fromNested() {}
+      `,
+    });
+
+    const result = host.run("calldiff tree --file src/routes.ts");
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("fromExact()");
+    expect(result.stdout).not.toContain("fromNested()");
   });
 
-  test("resolveEntrypointFile throws when missing", () => {
-    expect(() => resolveEntrypointFile("missing.ts", ["src/boot.ts"])).toThrow(
+  test("errors when a file entrypoint is missing", () => {
+    const host = workspace({
+      "/src/boot.ts": src`
+        export function boot() {}
+      `,
+    });
+
+    const result = host.run("calldiff tree --file missing.ts");
+    expect(result.code).not.toBe(0);
+    expect(`${result.stdout}\n${result.stderr}`).toMatch(
       /Entrypoint file not found/,
     );
   });
 
-  test("resolveFileEntrypoints returns exported defs only", () => {
-    const index = buildIndex([
-      fn("boot", "src/boot.ts", ["run"], true),
-      fn("run", "src/boot.ts", [], false),
-      fn("other", "src/other.ts", [], true),
-    ]);
-
-    expect(resolveFileEntrypoints("boot.ts", index).map((i) => i.key)).toEqual([
-      "boot",
-    ]);
-  });
-
-  test("resolveFileEntrypoints rejects ambiguous paths", () => {
-    const index = buildIndex([
-      fn("boot", "packages/a/src/boot.ts", [], true),
-      fn("boot", "packages/b/src/boot.ts", [], true),
-    ]);
-
-    expect(() => resolveFileEntrypoints("boot.ts", index)).toThrow(
-      /Ambiguous entrypoint file/,
-    );
-  });
-});
-
-describe("resolveExplicitDiffEntries with --file", () => {
-  test("expands a file path to exported keys", () => {
-    const before = buildIndex([
-      fn("boot", "src/boot.ts", ["old"], true),
-      fn("helper", "src/boot.ts", [], false),
-    ]);
-    const after = buildIndex([
-      fn("boot", "src/boot.ts", ["new"], true),
-      fn("helper", "src/boot.ts", [], false),
-    ]);
-
-    expect(
-      resolveExplicitDiffEntries(before, after, [], ["src/boot.ts"]).map(
-        (e) => e.key,
-      ),
-    ).toEqual(["boot"]);
-  });
-});
-
-describe("CLI --file entrypoints", () => {
   test("tree --file expands exported symbols in that file", () => {
     const host = workspace({
       "/packages/api/src/boot.ts": src`

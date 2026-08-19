@@ -1,55 +1,86 @@
+import { outdent } from "outdent";
 import { expect, test } from "vitest";
-import { inferEntries } from "../src/infer.js";
-import type { FunctionIndex } from "../src/extract.js";
-import type { FunctionInfo } from "../src/types.js";
+import { workspace } from "./workspace.js";
 
-function fn(
-  key: string,
-  calls: string[],
-  exported = false,
-): FunctionInfo {
-  return {
-    key,
-    label: `${key}()`,
-    file: "file.ts",
-    steps: calls.map((call) => ({ type: "call", key: call })),
-    exported,
-    start: 0,
-    end: 1,
-  };
-}
-
-function index(...functions: FunctionInfo[]): FunctionIndex {
-  return new Map(functions.map((fn) => [fn.key, fn]));
-}
+const src = outdent({ trimTrailingNewline: false });
 
 test("infers only exported ancestors of changed functions", () => {
-  const before = index(
-    fn("changed", ["oldCall"]),
-    fn("changedRoot", ["changed"], true),
-    fn("stable", ["sameCall"]),
-    fn("stableRoot", ["stable"], true),
-  );
-  const after = index(
-    fn("changed", ["newCall"]),
-    fn("changedRoot", ["changed"], true),
-    fn("stable", ["sameCall"]),
-    fn("stableRoot", ["stable"], true),
-  );
+  const host = workspace();
+  const from = host.commit("before", {
+    "/app.ts": src`
+      export function changedRoot() {
+        changed();
+      }
+      function changed() {
+        oldCall();
+      }
+      export function stableRoot() {
+        stable();
+      }
+      function stable() {
+        sameCall();
+      }
+    `,
+  });
+  const to = host.commit("after", {
+    "/app.ts": src`
+      export function changedRoot() {
+        changed();
+      }
+      function changed() {
+        newCall();
+      }
+      export function stableRoot() {
+        stable();
+      }
+      function stable() {
+        sameCall();
+      }
+    `,
+  });
 
-  expect(inferEntries(before, after, [], 12)).toEqual(["changedRoot"]);
+  const result = host.run(`calldiff diff ${from} ${to}`);
+  expect(result.code).toBe(0);
+  expect(result.stdout).toContain("changedRoot()");
+  expect(result.stdout).not.toContain("stableRoot()");
 });
 
 test("falls back to changed non-exported functions", () => {
-  const before = index(fn("worker", ["oldCall"]));
-  const after = index(fn("worker", ["newCall"]));
+  const host = workspace();
+  const from = host.commit("before", {
+    "/app.ts": src`
+      function worker() {
+        oldCall();
+      }
+    `,
+  });
+  const to = host.commit("after", {
+    "/app.ts": src`
+      function worker() {
+        newCall();
+      }
+    `,
+  });
 
-  expect(inferEntries(before, after, [], 12)).toEqual(["worker"]);
+  const result = host.run(`calldiff diff ${from} ${to}`);
+  expect(result.code).toBe(0);
+  expect(result.stdout).toContain("worker()");
+  expect(result.stdout).toContain("oldCall()");
+  expect(result.stdout).toContain("newCall()");
 });
 
-test("retains explicit unchanged entries without a diff", () => {
-  const before = index(fn("root", ["sameCall"], true));
-  const after = index(fn("root", ["sameCall"], true));
+test("explicit unchanged entries report no callstack changes", () => {
+  const host = workspace();
+  const from = host.commit("before", {
+    "/app.ts": src`
+      export function root() {
+        sameCall();
+      }
+    `,
+  });
+  const to = host.commit("after");
 
-  expect(inferEntries(before, after, ["root"], 12)).toEqual(["root"]);
+  const result = host.run(`calldiff diff ${from} ${to} -e root`);
+  expect(result.code).toBe(0);
+  expect(result.stdout).toContain("No callstack changes for requested entrypoints.");
 });

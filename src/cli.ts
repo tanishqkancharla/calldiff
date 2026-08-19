@@ -8,11 +8,17 @@ import type { DiffResult, ReachResult, TreeResult } from "./types.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+type PackageJson = {
+  version?: string;
+};
+
 function readVersion(): string {
   try {
-    const pkg = JSON.parse(
+    const raw: unknown = JSON.parse(
       readFileSync(join(__dirname, "..", "package.json"), "utf8"),
-    ) as { version?: string };
+    );
+    // SAFETY: package.json is authored by this repo; only version is read.
+    const pkg = raw as PackageJson;
     return pkg.version ?? "0.0.0";
   } catch {
     return "0.0.0";
@@ -132,21 +138,32 @@ function entriesFromOption(
   return Array.isArray(entry) ? entry : [entry];
 }
 
+type CtaCommandOptions = {
+  entry?: string;
+  file?: string;
+  to?: string;
+};
+
 type CtaMeta = {
   cta: {
     commands: Array<{
       command: string;
       description?: string;
-      options?: Record<string, unknown>;
+      options?: CtaCommandOptions;
     }>;
   };
 };
 
+/** Empty payload when ASCII was already written to stdout and only a CTA remains. */
+type AsciiCtaPayload = Record<string, never>;
+
 type EmitContext = {
   agent: boolean;
   formatExplicit: boolean;
-  ok: (data: unknown, meta?: CtaMeta) => never;
+  ok: (data: AsciiCtaPayload, meta?: CtaMeta) => never;
 };
+
+type CommandResult = DiffResult | TreeResult | ReachResult;
 
 /**
  * Default: classic ASCII (TTY + pipes) with optional CTAs.
@@ -161,9 +178,9 @@ type EmitContext = {
  */
 function emitAsciiOrData(
   c: EmitContext,
-  result: DiffResult | TreeResult | ReachResult,
+  result: CommandResult,
   cta?: CtaMeta,
-): unknown {
+): CommandResult | string | undefined {
   if (!c.formatExplicit) {
     if (tokenFlagActive) return result.ascii;
     process.stdout.write(
@@ -214,7 +231,7 @@ const pathsArg = z
 
 export const cli = Cli.create("calldiff", {
   description:
-    "Diff call stacks across git commits for agentic code review (22 languages)",
+    "Diff call stacks across git commits for agentic code review (23 languages)",
   version: readVersion(),
   hint: "Commands: diff (compare two trees), tree (view one tree), reach (paths between symbols). Path filters are trailing positionals (a leading -- is also accepted). Use --format json for structured agent output.",
   sync: {

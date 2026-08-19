@@ -1,13 +1,13 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { outdent } from "outdent";
 import { describe, expect, test } from "vitest";
-import { buildCallTree } from "../src/calltree.js";
-import { buildIndex, extractFunctions } from "../src/extract.js";
-import { renderTree } from "../src/render.js";
+import { workspace } from "./workspace.js";
 
+const src = outdent({ trimTrailingNewline: false });
 const checkoutDir = join(process.cwd(), "examples/checkout");
 
-function loadCheckoutIndex() {
+function checkoutWorkspace() {
   const files = [
     "checkout.ts",
     "cart.ts",
@@ -15,108 +15,87 @@ function loadCheckoutIndex() {
     "payments.ts",
     "notify.ts",
   ];
-  const all = files.flatMap((name) => {
-    const file = `examples/checkout/${name}`;
-    const source = readFileSync(join(checkoutDir, name), "utf8");
-    return extractFunctions(file, source);
-  });
-  return buildIndex(all);
+  const seeded: Record<string, string> = {};
+  for (const name of files) {
+    seeded[`/${name}`] = readFileSync(join(checkoutDir, name), "utf8");
+  }
+  return workspace(seeded);
 }
 
 describe("call-site source locations", () => {
   test("child locs point at the caller file/line, not the callee definition", () => {
-    const index = loadCheckoutIndex();
-    const tree = buildCallTree("runCheckout", index, 12);
+    const host = checkoutWorkspace();
+    const result = host.run("calldiff tree -e runCheckout --locs");
 
-    // Root = definition of runCheckout in checkout.ts
-    expect(tree.file).toBe("examples/checkout/checkout.ts");
-    expect(tree.line).toBe(12);
-
-    const cartLoad = tree.children.find((c) => c.key === "Cart.load");
-    expect(cartLoad).toBeTruthy();
-    // Call site is inside runCheckout, not Cart.load's definition in cart.ts
-    expect(cartLoad!.file).toBe("examples/checkout/checkout.ts");
-    expect(cartLoad!.line).toBe(13);
-
-    const readCart = cartLoad!.children.find((c) => c.key === "readCart");
-    expect(readCart).toBeTruthy();
-    // Call site is inside Cart.load in cart.ts (not readCart's own definition)
-    expect(readCart!.file).toBe("examples/checkout/cart.ts");
-    expect(readCart!.line).toBe(8);
-    // Definition of readCart is later in the same file — must not use that line
-    expect(readCart!.line).not.toBe(21);
+    expect(result.code).toBe(0);
+    expect(result.stdout).toMatch(/^runCheckout\(userId, cartId\) {2}checkout\.ts:12$/m);
+    expect(result.stdout).toMatch(/Cart\.load\(cartId\) {2}checkout\.ts:13/);
+    expect(result.stdout).toMatch(/readCart\(cartId\) {2}cart\.ts:8/);
+    expect(result.stdout).not.toMatch(/readCart\(cartId\) {2}cart\.ts:21/);
   });
 
   test("ASCII render appends file:line; unresolved calls still show call-site", () => {
-    const source = `
-export function outer() {
-  known();
-  mystery();
-}
-function known() {}
-`;
-    const index = buildIndex(extractFunctions("app.ts", source));
-    const tree = buildCallTree("outer", index, 12);
-    const ascii = renderTree(tree, { color: false, locs: true });
-
-    expect(ascii).toBe(
-      [
-        "outer()  app.ts:2",
-        "├─ known()  app.ts:3",
-        "└─ mystery()  app.ts:4",
-      ].join("\n"),
-    );
-
-    const mystery = tree.children.find((c) => c.key === "mystery");
-    expect(mystery).toMatchObject({
-      file: "app.ts",
-      line: 4,
+    const host = workspace({
+      "/app.ts": src`
+        export function outer() {
+          known();
+          mystery();
+        }
+        function known() {}
+      `,
     });
+
+    const result = host.run("calldiff tree -e outer --locs");
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain(src`
+      outer()  app.ts:1
+      ├─ known()  app.ts:2
+      └─ mystery()  app.ts:3
+    `.trimEnd());
   });
 
   test("branch nodes carry condition locs; children keep call-site locs", () => {
-    const source = `
-export function gate(ok: boolean) {
-  if (ok) {
-    yes();
-  } else {
-    no();
-  }
-}
-function yes() {}
-function no() {}
-`;
-    const index = buildIndex(extractFunctions("gate.ts", source));
-    const tree = buildCallTree("gate", index, 12);
-    const ifArm = tree.children.find((c) => c.key.startsWith("if:"));
-    const elseArm = tree.children.find((c) => c.key === "else");
-    expect(ifArm?.file).toBe("gate.ts");
-    expect(ifArm?.line).toBe(3);
-    expect(elseArm?.file).toBe("gate.ts");
+    const host = workspace({
+      "/gate.ts": src`
+        export function gate(ok: boolean) {
+          if (ok) {
+            yes();
+          } else {
+            no();
+          }
+        }
+        function yes() {}
+        function no() {}
+      `,
+    });
 
-    expect(ifArm!.children[0]).toMatchObject({
-      key: "yes",
-      file: "gate.ts",
-      line: 4,
-    });
-    expect(elseArm!.children[0]).toMatchObject({
-      key: "no",
-      file: "gate.ts",
-      line: 6,
-    });
+    const result = host.run("calldiff tree -e gate --locs");
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain(src`
+      gate(ok)  gate.ts:1
+      ├─ if (ok)  gate.ts:2
+         └─ yes()  gate.ts:3
+      └─ else  gate.ts:4-6
+         └─ no()  gate.ts:5
+    `.trimEnd());
   });
 
   test("locs:false omits suffixes from ASCII", () => {
-    const source = `
-export function outer() {
-  known();
-}
-function known() {}
-`;
-    const index = buildIndex(extractFunctions("app.ts", source));
-    const tree = buildCallTree("outer", index, 12);
-    expect(renderTree(tree, { color: false, locs: false })).toBe(
-      ["outer()", "└─ known()"].join("\n"),
-    );
+    const host = workspace({
+      "/app.ts": src`
+        export function outer() {
+          known();
+        }
+        function known() {}
+      `,
+    });
+
+    const result = host.run("calldiff tree -e outer");
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain(src`
+      outer()
+      └─ known()
+    `.trimEnd());
+    expect(result.stdout).not.toMatch(/app\.ts:\d/);
   });
 });

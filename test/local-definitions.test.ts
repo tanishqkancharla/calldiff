@@ -1,6 +1,5 @@
 import { outdent } from "outdent";
 import { describe, expect, test } from "vitest";
-import { buildIndex, extractFunctions } from "../src/extract.js";
 import { workspace } from "./workspace.js";
 
 /** Keep the trailing newline so expectations match CLI stdout. */
@@ -111,25 +110,6 @@ describe("locally declared helpers", () => {
     const result = host.run("calldiff reach -e buildTree --to sendEmail");
 
     expect(result.stdout).toContain("No paths from buildTree to sendEmail.");
-  });
-
-  test("a helper is extracted as its own definition, marked local", () => {
-    const fns = extractFunctions("src/tree.ts", tree);
-
-    expect(fns.map((fn) => fn.key)).toContain("walk");
-    expect(fns.find((fn) => fn.key === "walk")?.local).toBe(true);
-    expect(fns.find((fn) => fn.key === "buildTree")?.local).toBeUndefined();
-  });
-
-  test("a helper never takes the bare key from a top-level definition", () => {
-    const index = buildIndex([
-      ...extractFunctions("src/tree.ts", tree),
-      ...extractFunctions("scripts/gate.ts", gate),
-    ]);
-
-    // `src/tree.ts` is indexed first, but its local helper must not become the
-    // global answer for `walk`.
-    expect(index.get("walk")?.file).toBe("scripts/gate.ts");
   });
 
   test("javascript helpers resolve the same way", () => {

@@ -23,6 +23,11 @@ function isFnLike(type: string): boolean {
   );
 }
 
+/** Nested function/arrow, not a method — skip as a sibling, maybe nest under a call. */
+function isCallback(type: string): boolean {
+  return isFnLike(type) && type !== "method_definition";
+}
+
 function getParamsLabel(params: SyntaxNode | null): string {
   if (!params || params.type !== "formal_parameters") return "()";
   const parts: string[] = [];
@@ -164,10 +169,29 @@ function collectStatements(
     }
   };
 
+  const emitCall = (
+    key: string | null,
+    node: SyntaxNode,
+    nested: CallStep[],
+  ) => {
+    if (key && nested.length > 0) {
+      steps.push({
+        type: "call",
+        key,
+        ...locFromNode(file, node),
+        children: nested,
+      });
+    } else if (key) {
+      addCall(key, node);
+    } else {
+      steps.push(...nested);
+    }
+  };
+
   const walkExpr = (node: SyntaxNode): void => {
     const type = node.type;
 
-    if (isFnLike(type) && type !== "method_definition") {
+    if (isCallback(type)) {
       return;
     }
 
@@ -238,21 +262,24 @@ function collectStatements(
       return;
     }
 
-    if (type === "call_expression") {
+    if (type === "call_expression" || type === "new_expression") {
+      const isNew = type === "new_expression";
       const callee = node.namedChild(0);
-      if (callee) {
-        const key = calleeKey(callee, className);
-        if (key) addCall(key, node);
-      }
-    } else if (type === "new_expression") {
-      const callee = node.namedChild(0);
-      if (callee) {
-        const key = calleeKey(callee, null);
-        if (key) {
-          addCall(key.startsWith("new ") ? key : `new ${key}`, node);
-        }
-      }
-    } else if (type === "jsx_element") {
+      const bare = callee ? calleeKey(callee, isNew ? null : className) : null;
+      const key =
+        bare && isNew && !bare.startsWith("new ") ? `new ${bare}` : bare;
+      const args = childByType(node, "arguments");
+      emitCall(
+        key,
+        node,
+        args ? stepsFromArguments(file, args, className) : [],
+      );
+      // `foo(x).bar()` keeps `foo` — the receiver is not an argument.
+      if (callee) walkExpr(callee);
+      return;
+    }
+
+    if (type === "jsx_element") {
       const opening = childByType(node, "jsx_opening_element");
       const childNodes = namedChildren(node).filter(
         (c) =>
@@ -273,44 +300,19 @@ function collectStatements(
         ...fromAttrs,
         ...collectStatements(file, childNodes, className),
       ];
-      if (opening) {
-        const key = jsxCalleeKey(opening);
-        if (key) {
-          if (nested.length > 0) {
-            steps.push({
-              type: "call",
-              key,
-              ...locFromNode(file, opening),
-              children: nested,
-            });
-          } else {
-            addCall(key, opening);
-          }
-          return;
-        }
-      }
-      for (const step of nested) steps.push(step);
+      emitCall(opening ? jsxCalleeKey(opening) : null, opening ?? node, nested);
       return;
-    } else if (type === "jsx_self_closing_element") {
+    }
+
+    if (type === "jsx_self_closing_element") {
       const attrNodes = namedChildren(node).filter(
         (c) => c.type === "jsx_attribute" || c.type === "jsx_expression",
       );
-      const nested = collectStatements(file, attrNodes, className);
-      const key = jsxCalleeKey(node);
-      if (key) {
-        if (nested.length > 0) {
-          steps.push({
-            type: "call",
-            key,
-            ...locFromNode(file, node),
-            children: nested,
-          });
-        } else {
-          addCall(key, node);
-        }
-      } else {
-        for (const step of nested) steps.push(step);
-      }
+      emitCall(
+        jsxCalleeKey(node),
+        node,
+        collectStatements(file, attrNodes, className),
+      );
       return;
     }
 
@@ -324,6 +326,91 @@ function collectStatements(
   }
 
   return steps;
+}
+
+/** Named children of a function node that are never its runtime body. */
+const NON_BODY = new Set([
+  "comment",
+  "formal_parameters",
+  "type_parameters",
+  "type_annotation",
+  "identifier",
+  "accessibility_modifier",
+  "async",
+  "readonly",
+]);
+
+function bodyOf(node: SyntaxNode): SyntaxNode | null {
+  return (
+    childByType(node, "statement_block") ??
+    namedChildren(node).find((c) => !NON_BODY.has(c.type)) ??
+    null
+  );
+}
+
+/** Peel `(a) => (b) => body` to `body`. A returned factory (`return () => tick()`) stays out. */
+function unwrapCurriedBody(body: SyntaxNode | null): SyntaxNode | null {
+  let current = body ? stripTypeWrappers(body) : null;
+  while (
+    current &&
+    (current.type === "arrow_function" ||
+      current.type === "function_expression" ||
+      current.type === "generator_function")
+  ) {
+    const inner = bodyOf(current);
+    if (!inner) return current;
+    current = stripTypeWrappers(inner);
+  }
+  return current;
+}
+
+/**
+ * Calls and callback bodies inside `(...)`, as children of the receiving call.
+ * Skip a callback already registered as its own definition (`const x = wrap(fn)`).
+ */
+function stepsFromArguments(
+  file: string,
+  args: SyntaxNode,
+  className: string | null,
+): CallStep[] {
+  const skipCallbacks = args.parent ? hoistsCallback(args.parent) : false;
+  const steps: CallStep[] = [];
+  for (const rawArg of namedChildren(args)) {
+    const arg = stripTypeWrappers(rawArg);
+    if (isCallback(arg.type)) {
+      if (skipCallbacks) continue;
+      steps.push(
+        ...collectStepsFromBody(
+          file,
+          unwrapCurriedBody(bodyOf(arg)),
+          className,
+        ),
+      );
+      continue;
+    }
+    steps.push(...collectStatements(file, [arg], className));
+  }
+  return steps;
+}
+
+/** True when this call's callback is extracted as a named definition. */
+function hoistsCallback(call: SyntaxNode): boolean {
+  let current: SyntaxNode | null = call.parent;
+  while (current && TRANSPARENT_EXPRESSIONS.has(current.type)) {
+    current = current.parent;
+  }
+  if (!current) return false;
+  if (
+    current.type === "variable_declarator" ||
+    current.type === "export_statement"
+  ) {
+    return true;
+  }
+  if (current.type === "arguments") {
+    const outer = current.parent;
+    return outer?.type === "call_expression" ? hoistsCallback(outer) : false;
+  }
+  return false;
 }
 
 function collectStepsFromBody(
@@ -429,7 +516,7 @@ function unwrapWrappedFunction(
       continue;
     }
     // Generators count too: `Effect.gen(function* () {...})` is this shape.
-    if (arg.type === "method_definition" || !isFnLike(arg.type)) continue;
+    if (!isCallback(arg.type)) continue;
     const named = childByType(arg, "identifier");
     handleFunctionNode(
       file,
@@ -578,19 +665,7 @@ function handleFunctionNode(
   if (!name) return;
   const key = className && !local ? `${className}.${name}` : name;
   const params = childByType(node, "formal_parameters");
-  const body =
-    childByType(node, "statement_block") ??
-    namedChildren(node).find(
-      (c) =>
-        c.type !== "formal_parameters" &&
-        c.type !== "type_parameters" &&
-        c.type !== "type_annotation" &&
-        c.type !== "identifier" &&
-        c.type !== "accessibility_modifier" &&
-        c.type !== "async" &&
-        c.type !== "readonly",
-    ) ??
-    null;
+  const body = unwrapCurriedBody(bodyOf(node));
 
   const info = functionFromParts(
     file,

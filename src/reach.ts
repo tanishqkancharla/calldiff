@@ -6,6 +6,10 @@ import {
 } from "./calltree.js";
 import type { FunctionIndex } from "./extract.js";
 import type { CallNode } from "./types.js";
+import {
+  assignOptionalResolutionFields,
+  assignOptionalTreeFields,
+} from "./types.js";
 
 function nodeMatchesTarget(
   nodeKey: string,
@@ -27,19 +31,14 @@ export function pathToTree(nodes: CallNode[]): CallNode {
     throw new Error("pathToTree requires at least one node");
   }
   const [head, ...rest] = nodes;
-  return {
+  const tree: CallNode = {
     key: head!.key,
     label: head!.label,
-    ...(head!.kind ? { kind: head!.kind } : {}),
-    ...(head!.file ? { file: head!.file } : {}),
-    ...(head!.line != null ? { line: head!.line } : {}),
-    ...(head!.endLine != null ? { endLine: head!.endLine } : {}),
-    ...(head!.resolved != null ? { resolved: head!.resolved } : {}),
-    ...(head!.declaredIn ? { declaredIn: head!.declaredIn } : {}),
-    ...(head!.truncated ? { truncated: head!.truncated } : {}),
-    ...(head!.recursive ? { recursive: head!.recursive } : {}),
     children: rest.length > 0 ? [pathToTree(rest)] : [],
   };
+  assignOptionalTreeFields(tree, head!);
+  assignOptionalResolutionFields(tree, head!);
+  return tree;
 }
 
 /**

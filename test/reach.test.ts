@@ -1,15 +1,11 @@
 import { outdent } from "outdent";
 import { describe, expect, test } from "vitest";
-import { buildCallTree } from "../src/calltree.js";
-import { buildIndex, extractFunctions } from "../src/extract.js";
-import { findReachPaths } from "../src/reach.js";
-import { renderTree } from "../src/render.js";
 import { workspace } from "./workspace.js";
 
 /** Keep the trailing newline so expectations match CLI stdout. */
 const src = outdent({ trimTrailingNewline: false });
 
-const source = `
+const checkout = src`
   export function runCheckout() {
     Cart.validate();
     const reserved = Inventory.reserve();
@@ -47,59 +43,57 @@ const source = `
     sendEmail();
   }
   function sendEmail() {}
+  function orphan() {}
 `;
-
-function indexOf(src: string) {
-  return buildIndex(extractFunctions("checkout.ts", src));
-}
 
 describe("reach paths", () => {
   test("finds every path from entry to target across branches", () => {
-    const index = indexOf(source);
-    const paths = findReachPaths("runCheckout", "sendEmail", index, 12);
-    const ascii = paths.map((p) =>
-      renderTree(p, { color: false, locs: false }),
-    );
+    const host = workspace({ "/checkout.ts": checkout });
+    const result = host.run("calldiff reach -e runCheckout --to sendEmail");
 
-    expect(ascii).toEqual([
-      [
-        "runCheckout()",
-        "└─ if (!reserved)",
-        "   └─ notifyCustomer()",
-        "      └─ sendEmail()",
-      ].join("\n"),
-      [
-        "runCheckout()",
-        "└─ notifyCustomer()",
-        "   └─ sendEmail()",
-      ].join("\n"),
-    ]);
+    expect(result.code).toBe(0);
+    expect(result.stdout).toEqual(src`
+      calldiff reach working tree: runCheckout → sendEmail
+
+      # path 1
+      runCheckout()
+      └─ if (!reserved)
+         └─ notifyCustomer()
+            └─ sendEmail()
+
+      # path 2
+      runCheckout()
+      └─ notifyCustomer()
+         └─ sendEmail()
+    `);
   });
 
   test("finds a single deep path to a leaf helper", () => {
-    const index = indexOf(source);
-    const paths = findReachPaths("runCheckout", "capture", index, 12);
-    expect(paths).toHaveLength(1);
-    expect(renderTree(paths[0]!, { color: false, locs: false })).toBe(
-      [
-        "runCheckout()",
-        "└─ PaymentGateway.charge()",
-        "   └─ capture()",
-      ].join("\n"),
-    );
+    const host = workspace({ "/checkout.ts": checkout });
+    const result = host.run("calldiff reach -e runCheckout --to capture");
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain(src`
+      runCheckout()
+      └─ PaymentGateway.charge()
+         └─ capture()
+    `.trimEnd());
   });
 
   test("returns empty when target is unreachable", () => {
-    const index = indexOf(source);
-    expect(findReachPaths("runCheckout", "missing", index, 12)).toEqual([]);
+    const host = workspace({ "/checkout.ts": checkout });
+    const result = host.run("calldiff reach -e runCheckout --to orphan");
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("No paths from runCheckout to orphan.");
   });
 
-  test("matches the full expanded tree when target is the entry", () => {
-    const index = indexOf(source);
-    const paths = findReachPaths("runCheckout", "runCheckout", index, 12);
-    expect(paths).toHaveLength(1);
-    expect(paths[0]!.children).toEqual([]);
-    expect(buildCallTree("runCheckout", index, 12).key).toBe("runCheckout");
+  test("matches the entry itself when target is the entry", () => {
+    const host = workspace({ "/checkout.ts": checkout });
+    const result = host.run("calldiff reach -e runCheckout --to runCheckout");
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("runCheckout()");
   });
 });
 

@@ -106,6 +106,56 @@ export interface Snapshot {
   ref: string;
 }
 
+export interface SnapshotPair {
+  from: Snapshot;
+  to: Snapshot;
+}
+
+export interface SnapshotPairWithPaths extends SnapshotPair {
+  paths: string[];
+}
+
+export interface SnapshotWithPaths {
+  snapshot: Snapshot;
+  paths: string[];
+}
+
+/** Copy optional location / kind fields onto a tree node without empty spreads. */
+export function assignOptionalTreeFields<
+  T extends {
+    kind?: CallNodeKind;
+    file?: string;
+    line?: number;
+    endLine?: number;
+  },
+>(
+  target: T,
+  source: {
+    kind?: CallNodeKind;
+    file?: string;
+    line?: number;
+    endLine?: number;
+  },
+): T {
+  if (source.kind) target.kind = source.kind;
+  if (source.file) target.file = source.file;
+  if (source.line != null) target.line = source.line;
+  if (source.endLine != null) target.endLine = source.endLine;
+  return target;
+}
+
+/** Copy call-resolution fields that `assignOptionalTreeFields` does not own. */
+export function assignOptionalResolutionFields(
+  target: CallNode,
+  source: CallNode,
+): CallNode {
+  if (source.resolved != null) target.resolved = source.resolved;
+  if (source.declaredIn) target.declaredIn = source.declaredIn;
+  if (source.truncated) target.truncated = source.truncated;
+  if (source.recursive) target.recursive = source.recursive;
+  return target;
+}
+
 export type CliMode = "diff" | "tree" | "reach";
 
 export interface DiffTreeResult {

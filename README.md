@@ -2,7 +2,7 @@
 
 Diff call stacks across git commits — like `git diff`, but for who-calls-whom.
 
-Built for **agentic code review**: when an agent (or you) rewires call flow, plain line diffs bury the shape of the change. `calldiff` shows which callees appeared, disappeared, or moved under an entrypoint — across **22 languages**.
+Built for **agentic code review**: when an agent (or you) rewires call flow, plain line diffs bury the shape of the change. `calldiff` shows which callees appeared, disappeared, or moved under an entrypoint — across **23 languages**.
 
 ```diff
   PiService.createAgentSession(options)
@@ -119,7 +119,7 @@ Prints every call path from the entrypoint to the target (including alternate `i
 
 ### Supported languages
 
-TypeScript, TSX, JavaScript, JSX, Python, Go, Rust, Java, Ruby, C, C++, C#, PHP, Kotlin, Swift, Scala, Lua, Elixir, Bash, Haskell, Zig, Solidity, OCaml.
+TypeScript, TSX, JavaScript, JSX, Python, Go, Rust, Java, Ruby, C, C++, C#, PHP, Kotlin, Swift, Scala, Lua, Elixir, Bash, Haskell, Zig, Solidity, OCaml, Perl.
 
 ## Output
 
@@ -138,7 +138,7 @@ This is syntactic (AST-based), not a full typechecker — dynamic calls won’t 
 
 ### Grammars
 
-`tree-sitter-typescript` and `tree-sitter-javascript` are dependencies, so TypeScript, TSX, JavaScript and JSX work with nothing else installed. The other 18 grammar packages — every other language of the 22 — are fetched from npm on first use and built natively into `~/.cache/calldiff/grammars` (a few MB each).
+`tree-sitter-typescript` and `tree-sitter-javascript` are dependencies, so TypeScript, TSX, JavaScript and JSX work with nothing else installed. The other 20 grammar packages — every other language of the 23 — are fetched from npm on first use and built natively into `~/.cache/calldiff/grammars` (a few MB each).
 
 - `CALLDIFF_GRAMMAR_CACHE=<dir>` — install somewhere else.
 - `--offline` (or `CALLDIFF_OFFLINE=1`) — never install. A file whose grammar is missing is skipped with one warning on stderr, and every language that *can* be parsed still answers, so a mixed repository degrades per file rather than failing outright.

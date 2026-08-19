@@ -37,8 +37,11 @@ export type WorkspaceHost = {
   ) => RunResult;
   /** Write (or overwrite) files relative to the workspace root. */
   write: (files: Record<string, string>) => void;
+  /** Delete a file relative to the workspace root. */
+  remove: (path: string) => void;
   /**
    * Stage and commit. Optional `files` are written first (same as `write`).
+   * With only a message, creates an empty commit.
    * Returns the new HEAD sha.
    */
   commit: (name: string, files?: Record<string, string>) => string;
@@ -79,34 +82,52 @@ export function workspace(files: Record<string, string> = {}): WorkspaceHost {
   git(root, ["init", "-q"]);
   git(root, ["config", "user.email", "test@example.com"]);
   git(root, ["config", "user.name", "Test"]);
+  // Isolate from the developer's global git (gpgsign, fsmonitor, hooks).
+  git(root, ["config", "commit.gpgsign", "false"]);
+  git(root, ["config", "tag.gpgsign", "false"]);
+  git(root, ["config", "core.fsmonitor", "false"]);
+  git(root, ["config", "core.untrackedCache", "false"]);
+  git(root, ["config", "core.hooksPath", "/dev/null"]);
 
   const host: WorkspaceHost = {
     root,
     write(next) {
       writeFiles(root, next);
     },
+    remove(path) {
+      const rel = normalizeWorkspacePath(path);
+      const abs = resolve(root, rel);
+      if (!abs.startsWith(root + sep) && abs !== root) {
+        throw new Error(`Refusing to remove outside workspace: ${path}`);
+      }
+      rmSync(abs, { force: true });
+    },
     commit(name, files) {
       if (files) writeFiles(root, files);
       git(root, ["add", "-A"]);
-      git(root, ["commit", "-qm", name]);
+      const args = ["commit", "-qm", name];
+      if (!files) args.push("--allow-empty");
+      git(root, args);
       return git(root, ["rev-parse", "HEAD"]).trim();
     },
     run(command, options) {
       const args = normalizeArgv(command);
-      const result = spawnSync(
-        process.execPath,
-        [tsxCli, calldiffCli, ...args],
-        {
-          cwd: root,
-          encoding: "utf8",
-          env: {
-            ...process.env,
-            // Keep grammar cache shared with the vitest env.
-            FORCE_COLOR: "0",
-            ...options?.env,
-          },
+      const result = spawnSync(process.execPath, [tsxCli, calldiffCli, ...args], {
+        cwd: root,
+        encoding: "utf8",
+        timeout: 90_000,
+        killSignal: "SIGKILL",
+        stdio: ["ignore", "pipe", "pipe"],
+        env: {
+          ...process.env,
+          // Keep grammar cache shared with the vitest env.
+          FORCE_COLOR: "0",
+          GIT_TERMINAL_PROMPT: "0",
+          GIT_CONFIG_GLOBAL: "/dev/null",
+          GIT_CONFIG_NOSYSTEM: "1",
+          ...options?.env,
         },
-      );
+      });
       return {
         stdout: result.stdout ?? "",
         stderr: result.stderr ?? "",
@@ -144,6 +165,15 @@ function git(cwd: string, args: string[]): string {
   const result = spawnSync("git", args, {
     cwd,
     encoding: "utf8",
+    timeout: 10_000,
+    stdio: ["ignore", "pipe", "pipe"],
+    env: {
+      ...process.env,
+      GIT_TERMINAL_PROMPT: "0",
+      GIT_OPTIONAL_LOCKS: "0",
+      GIT_CONFIG_GLOBAL: "/dev/null",
+      GIT_CONFIG_NOSYSTEM: "1",
+    },
   });
   if (result.status !== 0) {
     throw new Error(

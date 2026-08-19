@@ -196,12 +196,12 @@ function expandCall(
   // State the resolver computes anyway. Carried onto the node so a consumer can
   // tell "no calls beneath it" from "not resolvable" from "cut off by the depth
   // cap" without re-running at a deeper `--max-depth` and diffing the results.
-  const resolution = {
+  const resolution: { resolved: boolean; declaredIn?: SourceLoc } = {
     resolved: info !== undefined,
-    ...(info?.line != null
-      ? { declaredIn: pickLoc({ file: info.file, line: info.line }) as SourceLoc }
-      : {}),
   };
+  if (info?.line != null) {
+    resolution.declaredIn = pickLoc({ file: info.file, line: info.line });
+  }
 
   // Recursion is per definition, not per name: two same-named functions in
   // different files calling each other is not a cycle.
@@ -214,16 +214,18 @@ function expandCall(
       : pickLoc(callSite);
 
   if (depth >= maxDepth) {
-    const hasBody = Boolean(info?.steps.length) || Boolean(inlineChildren?.length);
-    return {
+    const hasBody =
+      Boolean(info?.steps.length) || Boolean(inlineChildren?.length);
+    const node: CallNode = {
       key,
       label,
       kind: "call",
       ...loc,
       ...resolution,
-      ...(hasBody ? { truncated: true as const } : {}),
       children: [],
     };
+    if (hasBody) node.truncated = true;
+    return node;
   }
 
   if (!info && !inlineChildren?.length) {

@@ -12,6 +12,7 @@ import { javascriptExtractor, javascriptreactExtractor } from "./javascript.js";
 import { kotlinExtractor } from "./kotlin.js";
 import { luaExtractor } from "./lua.js";
 import { ocamlExtractor } from "./ocaml.js";
+import { perlExtractor } from "./perl.js";
 import { phpExtractor } from "./php.js";
 import { pythonExtractor } from "./python.js";
 import { rubyExtractor } from "./ruby.js";
@@ -49,6 +50,7 @@ const extractors: LanguageExtractor[] = [
   zigExtractor,
   solidityExtractor,
   ocamlExtractor,
+  perlExtractor,
 ];
 
 const byExtension = new Map<string, LanguageExtractor>();

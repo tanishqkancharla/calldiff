@@ -28,7 +28,7 @@ Helpers: `namedChildren`, `childByType`, `collapseWs` from `./types.js`.
    Loops (`while (guard(x))`) already get this by taking the ordinary path.
    Same for a switch/match subject — `switch (getKind(x))` calls `getKind`
    before any arm is chosen, so walk it once, before the case branches.
-5. Nested function/lambda bodies NOT attributed to outer caller
+5. Nested function/lambda bodies NOT attributed to the outer caller. Argument calls and callback bodies belong under the receiving call.
 6. Ignore computed/dynamic callees when obvious
 
 ## Do NOT edit
@@ -36,11 +36,34 @@ Helpers: `namedChildren`, `childByType`, `collapseWs` from `./types.js`.
 - `src/extract.ts`, `src/git.ts` (parent updates)
 
 ## Tests
-Create `test/<id>.test.ts` using:
+Create `test/<id>.test.ts` as a `workspace()` CLI e2e test:
 ```ts
-import { test } from "./expectCallstack.js";
-test("...", ({ expectCallstack }) => {
-  expectCallstack(`...+/- fixture...`, "Entry.symbol", { file: "x.<ext>" }).toEqual(`...`);
+import { outdent } from "outdent";
+import { expect, test } from "vitest";
+import { workspace } from "./workspace.js";
+
+const src = outdent({ trimTrailingNewline: false });
+
+test("...", () => {
+  const host = workspace();
+  const from = host.commit("before", {
+    "/file.<ext>": src`
+      function entry() {
+        oldCall();
+      }
+    `,
+  });
+  const to = host.commit("after", {
+    "/file.<ext>": src`
+      function entry() {
+        newCall();
+      }
+    `,
+  });
+  const result = host.run(`calldiff diff ${from} ${to} -e entry`);
+  expect(result.code).toBe(0);
+  expect(result.stdout).toContain("- └─ oldCall()");
+  expect(result.stdout).toContain("+ └─ newCall()");
 });
 ```
 At least 2 tests: (1) helper refactor + if/else (2) method/receiver resolution.

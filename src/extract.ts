@@ -5,12 +5,16 @@
 import { createHash } from "node:crypto";
 import Parser from "tree-sitter";
 import type { CallStep, FunctionInfo } from "./types.js";
-import { loadGrammarPackage, resolveLanguage } from "./languages/grammars.js";
+import {
+  loadGrammarPackage,
+  resolveLanguage,
+  type GrammarLanguage,
+} from "./languages/grammars.js";
 import { detectLanguage } from "./languages/registry.js";
 import { linesFromOffsets } from "./loc.js";
 
 const parser = new Parser();
-const languageCache = new Map<string, unknown>();
+const languageCache = new Map<string, GrammarLanguage>();
 
 function grammarKey(npmPackage: string, grammarExport?: string): string {
   return grammarExport ? `${npmPackage}:${grammarExport}` : npmPackage;
@@ -20,7 +24,7 @@ function loadLanguage(
   npmPackage: string,
   grammarExport?: string,
   languageId?: string,
-): unknown {
+): GrammarLanguage {
   const key = grammarKey(npmPackage, grammarExport);
   const cached = languageCache.get(key);
   if (cached) return cached;
@@ -43,7 +47,10 @@ export function extractFunctions(
     extractor.grammarExport,
     extractor.id,
   );
-  parser.setLanguage(language as any);
+  // Grammar package exports are accepted by setLanguage at runtime; the
+  // published Language type requires fields not present on every package.
+  // @ts-expect-error tree-sitter Language under-specifies grammar module exports
+  parser.setLanguage(language);
   const tree = parser.parse(source);
   return extractor.extract(file, source, tree).map((fn) => {
     if (fn.line != null) return fn;
@@ -69,7 +76,7 @@ export function extractCached(
 
   if (!functions) {
     functions = extractFunctions(file, source).map(
-      ({ file: ignored, ...fn }) => fn,
+      ({ file: _ignored, ...fn }) => fn,
     );
     cache.set(key, functions);
   }

@@ -36,6 +36,10 @@ import type {
   Snapshot,
   TreeResult,
 } from "./types.js";
+import {
+  assignOptionalResolutionFields,
+  assignOptionalTreeFields,
+} from "./types.js";
 
 export type DiffRunOptions = {
   from?: string;
@@ -189,32 +193,24 @@ function resolveEntrypointInfos(
 }
 
 function serializeCallNode(node: CallNode): CallNode {
-  return {
+  const serialized: CallNode = {
     key: node.key,
     label: node.label,
-    ...(node.kind ? { kind: node.kind } : {}),
-    ...(node.file ? { file: node.file } : {}),
-    ...(node.line != null ? { line: node.line } : {}),
-    ...(node.endLine != null ? { endLine: node.endLine } : {}),
-    ...(node.resolved != null ? { resolved: node.resolved } : {}),
-    ...(node.declaredIn ? { declaredIn: node.declaredIn } : {}),
-    ...(node.truncated ? { truncated: node.truncated } : {}),
-    ...(node.recursive ? { recursive: node.recursive } : {}),
     children: node.children.map(serializeCallNode),
   };
+  assignOptionalTreeFields(serialized, node);
+  assignOptionalResolutionFields(serialized, node);
+  return serialized;
 }
 
 function serializeDiffNode(node: DiffNode): DiffNode {
-  return {
+  const serialized: DiffNode = {
     key: node.key,
     label: node.label,
     status: node.status,
-    ...(node.kind ? { kind: node.kind } : {}),
-    ...(node.file ? { file: node.file } : {}),
-    ...(node.line != null ? { line: node.line } : {}),
-    ...(node.endLine != null ? { endLine: node.endLine } : {}),
     children: node.children.map(serializeDiffNode),
   };
+  return assignOptionalTreeFields(serialized, node);
 }
 
 /** Diff call stacks between two snapshots. Returns structured data + ASCII. */
