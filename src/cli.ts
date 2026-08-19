@@ -8,11 +8,17 @@ import type { DiffResult, ReachResult, TreeResult } from "./types.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+type PackageJson = {
+  version?: string;
+};
+
 function readVersion(): string {
   try {
-    const pkg = JSON.parse(
+    const raw: unknown = JSON.parse(
       readFileSync(join(__dirname, "..", "package.json"), "utf8"),
-    ) as { version?: string };
+    );
+    // SAFETY: package.json is authored by this repo; only version is read.
+    const pkg = raw as PackageJson;
     return pkg.version ?? "0.0.0";
   } catch {
     return "0.0.0";
@@ -54,21 +60,32 @@ function entriesFromOption(
   return Array.isArray(entry) ? entry : [entry];
 }
 
+type CtaCommandOptions = {
+  entry?: string;
+  file?: string;
+  to?: string;
+};
+
 type CtaMeta = {
   cta: {
     commands: Array<{
       command: string;
       description?: string;
-      options?: Record<string, unknown>;
+      options?: CtaCommandOptions;
     }>;
   };
 };
 
+/** Empty payload when ASCII was already written to stdout and only a CTA remains. */
+type AsciiCtaPayload = Record<string, never>;
+
 type EmitContext = {
   agent: boolean;
   formatExplicit: boolean;
-  ok: (data: unknown, meta?: CtaMeta) => never;
+  ok: (data: AsciiCtaPayload, meta?: CtaMeta) => never;
 };
+
+type CommandResult = DiffResult | TreeResult | ReachResult;
 
 /**
  * Default: classic ASCII (TTY + pipes) with optional CTAs.
@@ -83,9 +100,9 @@ type EmitContext = {
  */
 function emitAsciiOrData(
   c: EmitContext,
-  result: DiffResult | TreeResult | ReachResult,
+  result: CommandResult,
   cta?: CtaMeta,
-): unknown {
+): CommandResult | string | undefined {
   if (!c.formatExplicit) {
     if (tokenFlagActive) return result.ascii;
     process.stdout.write(

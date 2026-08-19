@@ -102,12 +102,15 @@ function collectStatements(
     const mark = `${key}:${node.startIndex}`;
     if (seen.has(mark)) return;
     seen.add(mark);
-    steps.push({
+    const step: CallStep = {
       type: "call",
       key,
       ...locFromNode(file, node),
-      ...(children && children.length > 0 ? { children } : {}),
-    });
+    };
+    if (children && children.length > 0) {
+      step.children = children;
+    }
+    steps.push(step);
   };
 
   // Lambda arguments of THIS call only — lambdas under a nested call belong to it.
@@ -255,7 +258,7 @@ function collectStatements(
     if (node.type === "call_expression") {
       // `f(args) { lambda }` parses as call_expression(call_expression(f, args), lambda):
       // unwrap to the innermost callee, keeping every suffix level's arguments.
-      const argSubtrees: SyntaxNode[] = [...namedChildren(node).slice(1)];
+      const argSubtrees: SyntaxNode[] = namedChildren(node).slice(1);
       let callee = node.namedChild(0);
       while (callee?.type === "call_expression") {
         argSubtrees.push(...namedChildren(callee).slice(1));

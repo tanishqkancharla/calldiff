@@ -370,17 +370,6 @@ function handleLambdaAssignment(
   );
 }
 
-function unwrapFunction(node: SyntaxNode): SyntaxNode | null {
-  if (node.type === "function_definition") return node;
-  if (node.type === "decorated_definition") {
-    return (
-      childByType(node, "function_definition") ??
-      childByType(node, "class_definition")
-    );
-  }
-  return null;
-}
-
 function hasPropertyDecorator(decorated: SyntaxNode): boolean {
   for (const child of namedChildren(decorated)) {
     if (child.type !== "decorator") continue;

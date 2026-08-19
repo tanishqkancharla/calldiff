@@ -79,14 +79,14 @@ test("php: refactors calls into a helper with if/else", () => {
     + │  ├─ create_coding_tools()
     + │  └─ new Services()
     + ├─ services.boot()
-      ├─ if !\$options
+      ├─ if !$options
          └─ SessionManager.create()
       └─ else
          └─ SessionManager.open(id)
   `));
 });
 
-test("php: \$this->method resolves to Class.method", () => {
+test("php: $this->method resolves to Class.method", () => {
   const host = workspace();
   const from = host.commit("before", {
     "/runner.php": src`
@@ -257,9 +257,9 @@ test("php: elseif chains", () => {
   expect(result.code).toBe(0);
   expect(result.stdout).toContain(diffOutdent(`
       handle(status)
-      ├─ if \$status == 1
+      ├─ if $status == 1
          └─ do_a()
-      ├─ elseif \$status == 2
+      ├─ elseif $status == 2
          ├─ do_b()
     +    └─ do_extra()
       └─ else
