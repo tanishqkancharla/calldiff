@@ -67,7 +67,12 @@ type Repeatable = keyof typeof REPEATABLE;
  * stays true. Collected per `normalizeArgv` call; empty for non-argv callers,
  * who keep going through the parsed option.
  */
-let repeatedOptions: Record<Repeatable, string[]> = { entry: [], file: [] };
+type RepeatedOptions = {
+  entry: string[];
+  file: string[];
+};
+
+let repeatedOptions: RepeatedOptions = { entry: [], file: [] };
 
 /**
  * Strip lone `--` so `calldiff a b -- src` still works with incur, and record
@@ -80,9 +85,10 @@ export function normalizeArgv(argv: string[]): string[] {
   return tokens;
 }
 
-const REPEATABLE_ENTRIES = Object.entries(REPEATABLE) as Array<
-  [Repeatable, readonly string[]]
->;
+const REPEATABLE_ENTRIES: Array<[Repeatable, readonly string[]]> = [
+  ["entry", REPEATABLE.entry],
+  ["file", REPEATABLE.file],
+];
 
 /**
  * Scan post-`--`-strip tokens for repeated option values, matching how incur
@@ -94,10 +100,8 @@ const REPEATABLE_ENTRIES = Object.entries(REPEATABLE) as Array<
  * function does not know about are not skipped, which only matters if one is
  * literally `-e` or `--entry`.
  */
-export function collectRepeated(
-  tokens: string[],
-): Record<Repeatable, string[]> {
-  const found: Record<Repeatable, string[]> = { entry: [], file: [] };
+export function collectRepeated(tokens: string[]): RepeatedOptions {
+  const found: RepeatedOptions = { entry: [], file: [] };
 
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i]!;

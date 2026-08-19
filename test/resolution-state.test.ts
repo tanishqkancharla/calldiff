@@ -146,6 +146,7 @@ describe("resolution state in --format json", () => {
     );
 
     expect(result.code).toBe(0);
+    // SAFETY: incur wraps the tree result as `{ data: TreeResult }` JSON.
     const parsed = JSON.parse(result.stdout) as {
       data: { trees: Array<{ tree: CallNode }> };
     };

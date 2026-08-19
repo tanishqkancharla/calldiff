@@ -196,7 +196,8 @@ export function withInstallLock(
       mkdirSync(lockPath);
       break;
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+      const code = err instanceof Error ? errnoCode(err) : undefined;
+      if (code !== "EEXIST") throw err;
       if (lockIsStale(lockPath, staleMs)) {
         rmSync(lockPath, { recursive: true, force: true });
         continue;

@@ -74,6 +74,7 @@ const other = outdent`
 `;
 
 function entriesOf(stdout: string): string[] {
+  // SAFETY: incur wraps the tree result as `{ data: TreeResult }` JSON.
   const parsed = JSON.parse(stdout) as {
     data: { trees: Array<{ entry: string }> };
   };
