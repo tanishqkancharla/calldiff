@@ -381,3 +381,67 @@ test("kotlin when subject lives on the when branch", () => {
   expect(reach.stdout).toContain("when");
   expect(reach.stdout).not.toContain("No paths");
 });
+
+test("nested calls in a test still hit the if line", () => {
+  const host = workspace({
+    "/src/app.ts": src`
+      export function foo(x: number): number { return x; }
+      export function guard(x: number): boolean { return x > 0; }
+      export function target(): number { return 42; }
+      export function viaIf(x: number): number {
+        if (guard(foo(x))) { return target(); }
+        return 0;
+      }
+    `,
+  });
+
+  const tree = host.run("calldiff tree -e viaIf -- src");
+  expect(tree.code).toBe(0);
+  expect(tree.stdout).toContain(src`
+    viaIf(x)
+    └─ if (guard(foo(x)))
+       └─ target()
+  `.trimEnd());
+  expect(tree.stdout).not.toContain("├─ guard");
+  expect(tree.stdout).not.toContain("├─ foo");
+
+  const toGuard = host.run("calldiff reach -e viaIf --to guard -- src");
+  expect(toGuard.code).toBe(0);
+  expect(toGuard.stdout).toContain(src`
+    viaIf(x)
+    └─ if (guard(foo(x)))
+  `.trimEnd());
+  expect(toGuard.stdout).not.toContain("No paths");
+
+  const toFoo = host.run("calldiff reach -e viaIf --to foo -- src");
+  expect(toFoo.code).toBe(0);
+  expect(toFoo.stdout).toContain(src`
+    viaIf(x)
+    └─ if (guard(foo(x)))
+  `.trimEnd());
+  expect(toFoo.stdout).not.toContain("No paths");
+});
+
+test("reach into a condition callee's body goes through the if then the callee", () => {
+  const host = workspace({
+    "/src/app.ts": src`
+      export function helper(x: number): boolean { return x > 0; }
+      export function guard(x: number): boolean { return helper(x); }
+      export function target(): number { return 42; }
+      export function viaIf(x: number): number {
+        if (guard(x)) { return target(); }
+        return 0;
+      }
+    `,
+  });
+
+  const result = host.run("calldiff reach -e viaIf --to helper -- src");
+  expect(result.code).toBe(0);
+  expect(result.stdout).toContain(src`
+    viaIf(x)
+    └─ if (guard(x))
+       └─ guard(x)
+          └─ helper(x)
+  `.trimEnd());
+  expect(result.stdout).not.toContain("No paths");
+});

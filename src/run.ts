@@ -425,7 +425,13 @@ export function runReach(options: ReachRunOptions): ReachResult {
   for (const info of resolveFileInfos(index, files)) {
     if (!entryKeys.includes(info.key)) entryKeys.push(info.key);
     const tree = buildCallTreeFromInfo(info, index, maxDepth);
-    for (const path of collectPathsTo(tree, targetKey, options.to)) {
+    for (const path of collectPathsTo(
+      tree,
+      targetKey,
+      options.to,
+      index,
+      maxDepth,
+    )) {
       pathResults.push({
         ascii: renderTree(path, { color: false, locs }),
         tree: serializeCallNode(path),

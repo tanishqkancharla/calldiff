@@ -40,11 +40,14 @@ export interface CallNode {
   /** Re-entry into a definition already on the stack (rendered as a `⇄` suffix). */
   recursive?: true;
   /**
-   * Expanded calls from a branch test / switch subject.
+   * Calls from a branch test / switch subject, as an expression tree
+   * (not inlined callee bodies).
    *
    * Not rendered in ASCII (`label` already shows the condition). `reach` walks
-   * these so `--to guard` finds `if (guard(x))` without a sibling `guard(x)`
-   * next to the branch. Arm calls stay in `children`.
+   * these so `--to guard` and `--to foo` in `if (guard(foo(x)))` find that
+   * `if` line without a sibling next to the branch. Arm calls stay in
+   * `children`. Targets inside a condition callee's body still expand through
+   * the callee after the branch.
    */
   condition?: CallNode[];
   children: CallNode[];
@@ -71,8 +74,9 @@ export type CallStep =
       line?: number;
       endLine?: number;
       /**
-       * Calls in the test / subject. Not ASCII children; `reach` walks these.
-       * Empty / omitted when the test has no calls (`if (x > 0)`).
+       * Calls in the test / subject as an expression tree. Not ASCII children;
+       * `reach` walks these. Empty / omitted when the test has no calls
+       * (`if (x > 0)`). Nested `if (guard(foo(x)))` is `guard` with child `foo`.
        */
       condition?: CallStep[];
       children: CallStep[];

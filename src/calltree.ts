@@ -137,6 +137,43 @@ function displayCallLabel(
   return key.includes("(") ? key : `${key}()`;
 }
 
+/**
+ * Convert a branch test / switch subject to CallNodes without inlining
+ * callee bodies. Nested argument calls stay as expression children so
+ * `reach --to foo` in `if (guard(foo(x)))` can stop at the `if` line.
+ * Function bodies are walked separately in `collectPathsTo`.
+ */
+function expandConditionExpr(
+  steps: CallStep[],
+  index: FunctionIndex,
+  owner?: FunctionInfo,
+): CallNode[] {
+  return steps.map((step) => {
+    if (step.type === "branch") {
+      const node: CallNode = {
+        key: step.key,
+        label: step.label,
+        kind: "branch",
+        ...pickLoc(step),
+        children: expandConditionExpr(step.children, index, owner),
+      };
+      if (step.condition?.length) {
+        node.condition = expandConditionExpr(step.condition, index, owner);
+      }
+      return node;
+    }
+    const info = resolveCall(step.key, index, step, owner);
+    const node: CallNode = {
+      key: step.key,
+      label: displayCallLabel(step.key, index, info),
+      kind: "call",
+      ...pickLoc(step),
+      children: expandConditionExpr(step.children ?? [], index, owner),
+    };
+    return node;
+  });
+}
+
 function expandSteps(
   steps: CallStep[],
   index: FunctionIndex,
@@ -163,14 +200,7 @@ function expandSteps(
         ),
       };
       if (step.condition?.length) {
-        node.condition = expandSteps(
-          step.condition,
-          index,
-          depth,
-          maxDepth,
-          visiting,
-          owner,
-        );
+        node.condition = expandConditionExpr(step.condition, index, owner);
       }
       return node;
     }
