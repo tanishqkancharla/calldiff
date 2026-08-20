@@ -404,7 +404,7 @@ test("go: type switch as branches", () => {
   expect(result.code).toBe(0);
   expect(result.stdout).toContain(diffOutdent(`
       Handle(x)
-      ├─ switch x.(type)
+      ├─ switch x
          ├─ case int
             └─ DoInt()
          └─ default
