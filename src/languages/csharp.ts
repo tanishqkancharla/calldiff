@@ -1,7 +1,11 @@
 /**
  * C# callable extraction (tree-sitter-c-sharp).
  */
-import type { CallStep, FunctionInfo } from "../types.js";
+import {
+  branchWithCondition,
+  type CallStep,
+  type FunctionInfo,
+} from "../types.js";
 import {
   childByType,
   collapseWs,
@@ -83,12 +87,10 @@ function collectStatements(
     steps.push({ type: "call", key, ...locFromNode(file, node) });
   };
 
-  /** Branch tests are walked for calls too — see CONTRACT.md "Must support" #4. */
-  const addTestCalls = (test: SyntaxNode | null) => {
-    if (!test) return;
-    for (const step of collectStatements(file, [test], className)) {
-      steps.push(step);
-    }
+  /** Calls in a branch test — stored on `condition`, not as siblings. */
+  const collectTestCalls = (test: SyntaxNode | null): CallStep[] => {
+    if (!test) return [];
+    return collectStatements(file, [test], className);
   };
 
   const walk = (node: SyntaxNode): void => {
@@ -113,22 +115,26 @@ function collectStatements(
         namedChildren(node).find((c, i) => i > 0) ??
         null;
       const text = condText(cond);
-      addTestCalls(cond);
-      steps.push({
-        type: "branch",
-        key: text ? `if:${text}` : "if",
-        label: text ? `if ${text}` : "if",
-        ...locFromNode(file, cond ?? node),
-        children: consequent
-          ? collectStatements(
-              file,
-              consequent.type === "block"
-                ? namedChildren(consequent)
-                : [consequent],
-              className,
-            )
-          : [],
-      });
+      steps.push(
+        branchWithCondition(
+          {
+            type: "branch",
+            key: text ? `if:${text}` : "if",
+            label: text ? `if ${text}` : "if",
+            ...locFromNode(file, cond ?? node),
+            children: consequent
+              ? collectStatements(
+                  file,
+                  consequent.type === "block"
+                    ? namedChildren(consequent)
+                    : [consequent],
+                  className,
+                )
+              : [],
+          },
+          collectTestCalls(cond),
+        ),
+      );
 
       let alternative = node.childForFieldName("alternative");
       while (alternative) {
@@ -140,22 +146,26 @@ function collectStatements(
           const elifText = condText(elifCond);
           const elifCons =
             alternative.childForFieldName("consequence") ?? null;
-          addTestCalls(elifCond);
-          steps.push({
-            type: "branch",
-            key: elifText ? `else-if:${elifText}` : "else-if",
-            label: elifText ? `else if ${elifText}` : "else if",
-            ...locFromNode(file, elifCond ?? alternative),
-            children: elifCons
-              ? collectStatements(
-                  file,
-                  elifCons.type === "block"
-                    ? namedChildren(elifCons)
-                    : [elifCons],
-                  className,
-                )
-              : [],
-          });
+          steps.push(
+            branchWithCondition(
+              {
+                type: "branch",
+                key: elifText ? `else-if:${elifText}` : "else-if",
+                label: elifText ? `else if ${elifText}` : "else if",
+                ...locFromNode(file, elifCond ?? alternative),
+                children: elifCons
+                  ? collectStatements(
+                      file,
+                      elifCons.type === "block"
+                        ? namedChildren(elifCons)
+                        : [elifCons],
+                      className,
+                    )
+                  : [],
+              },
+              collectTestCalls(elifCond),
+            ),
+          );
           alternative = alternative.childForFieldName("alternative");
           continue;
         }
@@ -223,12 +233,11 @@ function collectStatements(
     }
 
     if (node.type === "switch_statement") {
-      // The subject runs before any arm. See CONTRACT.md "Must support" #4.
-      addTestCalls(
+      const subject =
         node.childForFieldName("value") ??
-          namedChildren(node).find((c) => c.type !== "switch_body") ??
-          null,
-      );
+        namedChildren(node).find((c) => c.type !== "switch_body") ??
+        null;
+      const cases: CallStep[] = [];
       const body =
         node.childForFieldName("body") ?? childByType(node, "switch_body");
       if (body) {
@@ -255,7 +264,7 @@ function collectStatements(
               c.type !== "discard_pattern",
           );
           if (isDefault && !pattern) {
-            steps.push({
+            cases.push({
               type: "branch",
               key: "default",
               label: "default",
@@ -264,7 +273,7 @@ function collectStatements(
             });
           } else {
             const text = pattern ? collapseWs(pattern.text) : "";
-            steps.push({
+            cases.push({
               type: "branch",
               key: text ? `case:${text}` : "case",
               label: text ? `case ${text}` : "case",
@@ -274,6 +283,19 @@ function collectStatements(
           }
         }
       }
+      const subjectText = subject ? condText(subject) : "";
+      steps.push(
+        branchWithCondition(
+          {
+            type: "branch",
+            key: subjectText ? `switch:${subjectText}` : "switch",
+            label: subjectText ? `switch (${subjectText})` : "switch",
+            ...locFromNode(file, subject ?? node),
+            children: cases,
+          },
+          collectTestCalls(subject),
+        ),
+      );
       return;
     }
 

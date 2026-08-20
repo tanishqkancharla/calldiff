@@ -1,7 +1,11 @@
 /**
  * Java callable extraction (tree-sitter-java).
  */
-import type { CallStep, FunctionInfo } from "../types.js";
+import {
+  branchWithCondition,
+  type CallStep,
+  type FunctionInfo,
+} from "../types.js";
 import {
   childByType,
   collapseWs,
@@ -94,12 +98,10 @@ function collectStatements(
     steps.push({ type: "call", key, ...locFromNode(file, node) });
   };
 
-  /** Branch tests are walked for calls too — see CONTRACT.md "Must support" #4. */
-  const addTestCalls = (test: SyntaxNode | null) => {
-    if (!test) return;
-    for (const step of collectStatements(file, [test], className)) {
-      steps.push(step);
-    }
+  /** Calls in a branch test — stored on `condition`, not as siblings. */
+  const collectTestCalls = (test: SyntaxNode | null): CallStep[] => {
+    if (!test) return [];
+    return collectStatements(file, [test], className);
   };
 
   const walk = (node: SyntaxNode): void => {
@@ -134,18 +136,20 @@ function collectStatements(
           : cond;
       const condText = condInner ? collapseWs(condInner.text) : "";
 
-      // The nested `else if` chain below re-collects through collectStatements,
-      // so its own test calls come back with it — only this test needs walking.
-      addTestCalls(condInner);
-      steps.push({
-        type: "branch",
-        key: condText ? `if:${condText}` : "if",
-        label: condText ? `if (${condText})` : "if",
-        ...locFromNode(file, condInner ?? node),
-        children: consequent
-          ? collectStatements(file, statementsOf(consequent), className)
-          : [],
-      });
+      steps.push(
+        branchWithCondition(
+          {
+            type: "branch",
+            key: condText ? `if:${condText}` : "if",
+            label: condText ? `if (${condText})` : "if",
+            ...locFromNode(file, condInner ?? node),
+            children: consequent
+              ? collectStatements(file, statementsOf(consequent), className)
+              : [],
+          },
+          collectTestCalls(condInner),
+        ),
+      );
 
       if (alternate) {
         // else-if: alternate block might actually be... no, else if is nested if_statement as alternate
@@ -237,8 +241,8 @@ function collectStatements(
       node.type === "switch_expression" ||
       node.type === "switch_statement"
     ) {
-      // The subject runs before any arm. See CONTRACT.md "Must support" #4.
-      addTestCalls(childByType(node, "parenthesized_expression"));
+      const subject = childByType(node, "parenthesized_expression");
+      const cases: CallStep[] = [];
       const body =
         childByType(node, "switch_block") ??
         childByType(node, "switch_body") ??
@@ -255,7 +259,7 @@ function collectStatements(
             const isDefault =
               label.namedChildCount === 0 || /\bdefault\b/.test(label.text);
             if (isDefault) {
-              steps.push({
+              cases.push({
                 type: "branch",
                 key: "default",
                 label: "default",
@@ -265,7 +269,7 @@ function collectStatements(
             } else {
               const value = label.namedChild(0);
               const text = value ? collapseWs(value.text) : "";
-              steps.push({
+              cases.push({
                 type: "branch",
                 key: text ? `case:${text}` : "case",
                 label: text ? `case ${text}` : "case",
@@ -286,7 +290,7 @@ function collectStatements(
             ? collectStatements(file, statementsOf(bodyNode), className)
             : [];
           if (isDefault) {
-            steps.push({
+            cases.push({
               type: "branch",
               key: "default",
               label: "default",
@@ -296,7 +300,7 @@ function collectStatements(
           } else {
             const value = label.namedChild(0);
             const text = value ? collapseWs(value.text) : "";
-            steps.push({
+            cases.push({
               type: "branch",
               key: text ? `case:${text}` : "case",
               label: text ? `case ${text}` : "case",
@@ -306,6 +310,23 @@ function collectStatements(
           }
         }
       }
+      const subjectInner =
+        subject?.type === "parenthesized_expression"
+          ? (subject.namedChild(0) ?? subject)
+          : subject;
+      const subjectText = subjectInner ? collapseWs(subjectInner.text) : "";
+      steps.push(
+        branchWithCondition(
+          {
+            type: "branch",
+            key: subjectText ? `switch:${subjectText}` : "switch",
+            label: subjectText ? `switch (${subjectText})` : "switch",
+            ...locFromNode(file, subject ?? node),
+            children: cases,
+          },
+          collectTestCalls(subject),
+        ),
+      );
       return;
     }
 

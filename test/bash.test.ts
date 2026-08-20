@@ -173,10 +173,11 @@ test("bash: elif chains and case branches", () => {
     +    └─ do_extra()
       ├─ else
          └─ do_c()
-      ├─ case a
-         └─ do_a()
-      ├─ case *
-         └─ do_c()
+      ├─ case ("$x")
+         ├─ case a
+            └─ do_a()
+         └─ case *
+            └─ do_c()
     + └─ flush()
   `));
 });

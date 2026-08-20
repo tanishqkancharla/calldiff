@@ -1,7 +1,11 @@
 /**
  * C++ callable extraction (tree-sitter-cpp).
  */
-import type { CallStep, FunctionInfo } from "../types.js";
+import {
+  branchWithCondition,
+  type CallStep,
+  type FunctionInfo,
+} from "../types.js";
 import {
   childByType,
   collapseWs,
@@ -97,12 +101,10 @@ function collectStatements(
     steps.push({ type: "call", key, ...locFromNode(file, node) });
   };
 
-  /** Branch tests are walked for calls too — see CONTRACT.md "Must support" #4. */
-  const addTestCalls = (test: SyntaxNode | null) => {
-    if (!test) return;
-    for (const step of collectStatements(file, [test], className)) {
-      steps.push(step);
-    }
+  /** Calls in a branch test — stored on `condition`, not as siblings. */
+  const collectTestCalls = (test: SyntaxNode | null): CallStep[] => {
+    if (!test) return [];
+    return collectStatements(file, [test], className);
   };
 
   const walk = (node: SyntaxNode): void => {
@@ -130,16 +132,20 @@ function collectStatements(
         ) ??
         null;
       const text = condText(cond);
-      addTestCalls(cond);
-      steps.push({
-        type: "branch",
-        key: text ? `if:${text}` : "if",
-        label: text ? `if ${text}` : "if",
-        ...locFromNode(file, cond ?? node),
-        children: consequent
-          ? collectStatements(file, [consequent], className)
-          : [],
-      });
+      steps.push(
+        branchWithCondition(
+          {
+            type: "branch",
+            key: text ? `if:${text}` : "if",
+            label: text ? `if ${text}` : "if",
+            ...locFromNode(file, cond ?? node),
+            children: consequent
+              ? collectStatements(file, [consequent], className)
+              : [],
+          },
+          collectTestCalls(cond),
+        ),
+      );
 
       let elseClause = childByType(node, "else_clause");
       while (elseClause) {
@@ -159,16 +165,20 @@ function collectStatements(
                 c.type !== "else_clause",
             ) ??
             null;
-          addTestCalls(elifCond);
-          steps.push({
-            type: "branch",
-            key: elifText ? `else-if:${elifText}` : "else-if",
-            label: elifText ? `else if ${elifText}` : "else if",
-            ...locFromNode(file, elifCond ?? elseClause),
-            children: elifCons
-              ? collectStatements(file, [elifCons], className)
-              : [],
-          });
+          steps.push(
+            branchWithCondition(
+              {
+                type: "branch",
+                key: elifText ? `else-if:${elifText}` : "else-if",
+                label: elifText ? `else if ${elifText}` : "else if",
+                ...locFromNode(file, elifCond ?? elseClause),
+                children: elifCons
+                  ? collectStatements(file, [elifCons], className)
+                  : [],
+              },
+              collectTestCalls(elifCond),
+            ),
+          );
           elseClause = childByType(inner, "else_clause");
           continue;
         }

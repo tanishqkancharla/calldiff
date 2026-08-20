@@ -212,13 +212,14 @@ test("c: switch cases as branches", () => {
   expect(result.code).toBe(0);
   expect(result.stdout).toContain(diffOutdent(`
       boot(x)
-      ├─ case 1
-         └─ do_a()
-      ├─ case 2
-         ├─ do_b()
-    +    └─ do_extra()
-      ├─ default
-         └─ do_other()
+      ├─ switch (x)
+         ├─ case 1
+            └─ do_a()
+         ├─ case 2
+            ├─ do_b()
+    +       └─ do_extra()
+         └─ default
+            └─ do_other()
     + └─ flush()
   `));
 });

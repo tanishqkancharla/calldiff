@@ -1,7 +1,11 @@
 /**
  * C callable extraction (tree-sitter-c).
  */
-import type { CallStep, FunctionInfo } from "../types.js";
+import {
+  branchWithCondition,
+  type CallStep,
+  type FunctionInfo,
+} from "../types.js";
 import {
   childByType,
   collapseWs,
@@ -109,10 +113,10 @@ function collectStatements(file: string, statements: SyntaxNode[]): CallStep[] {
     steps.push({ type: "call", key, ...locFromNode(file, node) });
   };
 
-  /** Branch tests are walked for calls too — see CONTRACT.md "Must support" #4. */
-  const addTestCalls = (test: SyntaxNode | null) => {
-    if (!test) return;
-    for (const step of collectStatements(file, [test])) steps.push(step);
+  /** Calls in a branch test — stored on `condition`, not as siblings. */
+  const collectTestCalls = (test: SyntaxNode | null): CallStep[] => {
+    if (!test) return [];
+    return collectStatements(file, [test]);
   };
 
   const walk = (node: SyntaxNode): void => {
@@ -130,14 +134,18 @@ function collectStatements(file: string, statements: SyntaxNode[]): CallStep[] {
         ) ??
         null;
       const text = condText(cond);
-      addTestCalls(cond);
-      steps.push({
-        type: "branch",
-        key: text ? `if:${text}` : "if",
-        label: text ? `if ${text}` : "if",
-        ...locFromNode(file, cond ?? node),
-        children: consequent ? collectStatements(file, [consequent]) : [],
-      });
+      steps.push(
+        branchWithCondition(
+          {
+            type: "branch",
+            key: text ? `if:${text}` : "if",
+            label: text ? `if ${text}` : "if",
+            ...locFromNode(file, cond ?? node),
+            children: consequent ? collectStatements(file, [consequent]) : [],
+          },
+          collectTestCalls(cond),
+        ),
+      );
 
       let elseClause = childByType(node, "else_clause");
       while (elseClause) {
@@ -156,14 +164,18 @@ function collectStatements(file: string, statements: SyntaxNode[]): CallStep[] {
                 c.type !== "else_clause",
             ) ??
             null;
-          addTestCalls(elifCond);
-          steps.push({
-            type: "branch",
-            key: elifText ? `else-if:${elifText}` : "else-if",
-            label: elifText ? `else if ${elifText}` : "else if",
-            ...locFromNode(file, elifCond ?? elseClause),
-            children: elifCons ? collectStatements(file, [elifCons]) : [],
-          });
+          steps.push(
+            branchWithCondition(
+              {
+                type: "branch",
+                key: elifText ? `else-if:${elifText}` : "else-if",
+                label: elifText ? `else if ${elifText}` : "else if",
+                ...locFromNode(file, elifCond ?? elseClause),
+                children: elifCons ? collectStatements(file, [elifCons]) : [],
+              },
+              collectTestCalls(elifCond),
+            ),
+          );
           elseClause = childByType(inner, "else_clause");
           continue;
         }
@@ -180,11 +192,10 @@ function collectStatements(file: string, statements: SyntaxNode[]): CallStep[] {
     }
 
     if (node.type === "switch_statement") {
-      // The subject runs before any arm. See CONTRACT.md "Must support" #4.
-      addTestCalls(
+      const subject =
         node.childForFieldName("condition") ??
-          childByType(node, "parenthesized_expression"),
-      );
+        childByType(node, "parenthesized_expression");
+      const cases: CallStep[] = [];
       const body =
         node.childForFieldName("body") ??
         childByType(node, "compound_statement");
@@ -197,7 +208,7 @@ function collectStatements(file: string, statements: SyntaxNode[]): CallStep[] {
           );
           if (value) {
             const text = collapseWs(value.text);
-            steps.push({
+            cases.push({
               type: "branch",
               key: `case:${text}`,
               label: `case ${text}`,
@@ -205,7 +216,7 @@ function collectStatements(file: string, statements: SyntaxNode[]): CallStep[] {
               children: collectStatements(file, kids),
             });
           } else {
-            steps.push({
+            cases.push({
               type: "branch",
               key: "default",
               label: "default",
@@ -215,6 +226,19 @@ function collectStatements(file: string, statements: SyntaxNode[]): CallStep[] {
           }
         }
       }
+      const subjectText = subject ? condText(subject) : "";
+      steps.push(
+        branchWithCondition(
+          {
+            type: "branch",
+            key: subjectText ? `switch:${subjectText}` : "switch",
+            label: subjectText ? `switch (${subjectText})` : "switch",
+            ...locFromNode(file, subject ?? node),
+            children: cases,
+          },
+          collectTestCalls(subject),
+        ),
+      );
       return;
     }
 

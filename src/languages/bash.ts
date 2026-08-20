@@ -1,7 +1,11 @@
 /**
  * Bash callable extraction (tree-sitter-bash).
  */
-import type { CallStep, FunctionInfo } from "../types.js";
+import {
+  branchWithCondition,
+  type CallStep,
+  type FunctionInfo,
+} from "../types.js";
 import {
   childByType,
   collapseWs,
@@ -75,10 +79,10 @@ function collectStatements(file: string, statements: SyntaxNode[]): CallStep[] {
     steps.push({ type: "call", key, ...locFromNode(file, node) });
   };
 
-  /** Branch tests are walked for calls too — see CONTRACT.md "Must support" #4. */
-  const addTestCalls = (test: SyntaxNode | null) => {
-    if (!test) return;
-    for (const step of collectStatements(file, [test])) steps.push(step);
+  /** Calls in a branch test — stored on `condition`, not as siblings. */
+  const collectTestCalls = (test: SyntaxNode | null): CallStep[] => {
+    if (!test) return [];
+    return collectStatements(file, [test]);
   };
 
   const walk = (node: SyntaxNode): void => {
@@ -121,14 +125,18 @@ function collectStatements(file: string, statements: SyntaxNode[]): CallStep[] {
       // If first kid is the condition already captured as test, drop it from consequent
       const thenStmts = consequent.filter((c) => c !== cond);
 
-      addTestCalls(test);
-      steps.push({
-        type: "branch",
-        key: condText ? `if:${condText}` : "if",
-        label: condText ? `if ${condText}` : "if",
-        ...locFromNode(file, test ?? node),
-        children: collectStatements(file, thenStmts),
-      });
+      steps.push(
+        branchWithCondition(
+          {
+            type: "branch",
+            key: condText ? `if:${condText}` : "if",
+            label: condText ? `if ${condText}` : "if",
+            ...locFromNode(file, test ?? node),
+            children: collectStatements(file, thenStmts),
+          },
+          collectTestCalls(test),
+        ),
+      );
 
       for (const clause of elifClauses) {
         const elifKids = namedChildren(clause);
@@ -136,14 +144,18 @@ function collectStatements(file: string, statements: SyntaxNode[]): CallStep[] {
           childByType(clause, "test_command") ?? elifKids[0] ?? null;
         const text = elifTest ? collapseWs(elifTest.text) : "";
         const body = elifKids.filter((c) => c !== elifTest);
-        addTestCalls(elifTest);
-        steps.push({
-          type: "branch",
-          key: text ? `else-if:${text}` : "else-if",
-          label: text ? `elif ${text}` : "elif",
-          ...locFromNode(file, elifTest ?? clause),
-          children: collectStatements(file, body),
-        });
+        steps.push(
+          branchWithCondition(
+            {
+              type: "branch",
+              key: text ? `else-if:${text}` : "else-if",
+              label: text ? `elif ${text}` : "elif",
+              ...locFromNode(file, elifTest ?? clause),
+              children: collectStatements(file, body),
+            },
+            collectTestCalls(elifTest),
+          ),
+        );
       }
 
       if (elseClause) {
@@ -159,10 +171,9 @@ function collectStatements(file: string, statements: SyntaxNode[]): CallStep[] {
     }
 
     if (node.type === "case_statement") {
-      // The subject runs before any arm. See CONTRACT.md "Must support" #4.
-      addTestCalls(
-        namedChildren(node).find((c) => c.type !== "case_item") ?? null,
-      );
+      const subject =
+        namedChildren(node).find((c) => c.type !== "case_item") ?? null;
+      const cases: CallStep[] = [];
       for (const item of namedChildren(node)) {
         if (item.type !== "case_item") continue;
         const kids = namedChildren(item);
@@ -178,7 +189,7 @@ function collectStatements(file: string, statements: SyntaxNode[]): CallStep[] {
           ) ?? kids[0] ?? null;
         const text = pattern ? collapseWs(pattern.text) : "";
         const body = kids.filter((c) => c !== pattern);
-        steps.push({
+        cases.push({
           type: "branch",
           key: text ? `case:${text}` : "case",
           label: text ? `case ${text}` : "case",
@@ -186,6 +197,19 @@ function collectStatements(file: string, statements: SyntaxNode[]): CallStep[] {
           children: collectStatements(file, body),
         });
       }
+      const subjectText = subject ? collapseWs(subject.text) : "";
+      steps.push(
+        branchWithCondition(
+          {
+            type: "branch",
+            key: subjectText ? `case:${subjectText}` : "case",
+            label: subjectText ? `case (${subjectText})` : "case",
+            ...locFromNode(file, subject ?? node),
+            children: cases,
+          },
+          collectTestCalls(subject),
+        ),
+      );
       return;
     }
 
