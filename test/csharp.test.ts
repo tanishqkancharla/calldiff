@@ -365,10 +365,11 @@ test("csharp: try/catch/finally and switch as branches", () => {
          └─ Recover()
       ├─ finally
          └─ Close()
-      ├─ case 1
-         └─ DoA()
-      ├─ default
-         └─ DoOther()
+      ├─ switch (x)
+         ├─ case 1
+            └─ DoA()
+         └─ default
+            └─ DoOther()
     + └─ Flush()
   `));
 });

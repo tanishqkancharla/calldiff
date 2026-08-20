@@ -1,7 +1,11 @@
 /**
  * Elixir callable extraction (tree-sitter-elixir).
  */
-import type { CallStep, FunctionInfo } from "../types.js";
+import {
+  branchWithCondition,
+  type CallStep,
+  type FunctionInfo,
+} from "../types.js";
 import {
   childByType,
   collapseWs,
@@ -158,13 +162,18 @@ function collectStatements(
           ? namedChildren(doBlock).filter((c) => c.type !== "else_block")
           : [];
         const elseBlock = doBlock ? childByType(doBlock, "else_block") : null;
-        steps.push({
-          type: "branch",
-          key: condText ? `if:${condText}` : "if",
-          label: condText ? `if ${condText}` : "if",
-          ...locFromNode(file, cond ?? node),
-          children: collectStatements(file, thenKids, moduleName),
-        });
+        steps.push(
+          branchWithCondition(
+            {
+              type: "branch",
+              key: condText ? `if:${condText}` : "if",
+              label: condText ? `if ${condText}` : "if",
+              ...locFromNode(file, cond ?? node),
+              children: collectStatements(file, thenKids, moduleName),
+            },
+            cond ? collectStatements(file, [cond], moduleName) : [],
+          ),
+        );
         if (elseBlock) {
           steps.push({
             type: "branch",
@@ -174,8 +183,6 @@ function collectStatements(
             children: collectBody(file, elseBlock, moduleName),
           });
         }
-        // cond may contain calls — walk it
-        if (cond) walk(cond);
         return;
       }
       if (head && head.text === "case") {

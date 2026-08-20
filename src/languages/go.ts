@@ -1,7 +1,11 @@
 /**
  * Go callable extraction (tree-sitter-go).
  */
-import type { CallStep, FunctionInfo } from "../types.js";
+import {
+  branchWithCondition,
+  type CallStep,
+  type FunctionInfo,
+} from "../types.js";
 import {
   childByType,
   collapseWs,
@@ -89,15 +93,29 @@ function collectIf(
   const kind = asElseIf ? "else-if" : "if";
   const labelKind = asElseIf ? "else if" : "if";
 
-  steps.push({
-    type: "branch",
-    key: condText ? `${kind}:${condText}` : kind,
-    label: condText ? `${labelKind} ${condText}` : labelKind,
-    ...locFromNode(file, condNode ?? node),
-    children: consequent
-      ? collectStatements(file, statementsOf(consequent), receiverType)
-      : [],
-  });
+  // Init in `if v, err := doThing(); err != nil` runs unconditionally and stays
+  // a sibling. The condition is the branch identity, not a sibling step.
+  const initNodes = condNode ? before.filter((n) => n !== condNode) : before;
+  for (const pre of initNodes) {
+    for (const step of collectStatements(file, [pre], receiverType)) {
+      steps.push(step);
+    }
+  }
+
+  steps.push(
+    branchWithCondition(
+      {
+        type: "branch",
+        key: condText ? `${kind}:${condText}` : kind,
+        label: condText ? `${labelKind} ${condText}` : labelKind,
+        ...locFromNode(file, condNode ?? node),
+        children: consequent
+          ? collectStatements(file, statementsOf(consequent), receiverType)
+          : [],
+      },
+      condNode ? collectStatements(file, [condNode], receiverType) : [],
+    ),
+  );
 
   if (!alt) return;
   if (alt.type === "if_statement") {
@@ -166,6 +184,7 @@ function collectStatements(
             c.type !== "default_case",
         ) ?? null;
       const subjectText = subject ? collapseWs(subject.text) : "";
+      const cases: CallStep[] = [];
       for (const clause of kids) {
         if (clause.type === "expression_case" || clause.type === "type_case") {
           const expr =
@@ -175,7 +194,7 @@ function collectStatements(
             null;
           const text = expr ? collapseWs(expr.text) : "";
           const list = childByType(clause, "statement_list");
-          steps.push({
+          cases.push({
             type: "branch",
             key: text ? `case:${text}` : "case",
             label: text
@@ -191,7 +210,7 @@ function collectStatements(
         }
         if (clause.type === "default_case") {
           const list = childByType(clause, "statement_list");
-          steps.push({
+          cases.push({
             type: "branch",
             key: "default",
             label: "default",
@@ -202,6 +221,18 @@ function collectStatements(
           });
         }
       }
+      steps.push(
+        branchWithCondition(
+          {
+            type: "branch",
+            key: subjectText ? `switch:${subjectText}` : "switch",
+            label: subjectText ? `switch ${subjectText}` : "switch",
+            ...locFromNode(file, subject ?? node),
+            children: cases,
+          },
+          subject ? collectStatements(file, [subject], receiverType) : [],
+        ),
+      );
       return;
     }
 

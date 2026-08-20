@@ -6,7 +6,11 @@
  * statement. `package Foo;` scopes until the next package statement,
  * `package Foo { }` only its block.
  */
-import type { CallStep, FunctionInfo } from "../types.js";
+import {
+  branchWithCondition,
+  type CallStep,
+  type FunctionInfo,
+} from "../types.js";
 import {
   childByType,
   collapseWs,
@@ -263,16 +267,20 @@ function branchStep(
   cond: SyntaxNode | null,
   anchor: SyntaxNode,
   children: CallStep[],
+  condition: CallStep[] = [],
 ) {
   const text = cond === null ? "" : collapseWs(cond.text);
 
-  return {
-    type: "branch",
-    key: text === "" ? key : `${key}:${text}`,
-    label: text === "" ? label : `${label} ${text}`,
-    ...locFromNode(scope.file, cond ?? anchor),
-    children,
-  } satisfies CallStep;
+  return branchWithCondition(
+    {
+      type: "branch",
+      key: text === "" ? key : `${key}:${text}`,
+      label: text === "" ? label : `${label} ${text}`,
+      ...locFromNode(scope.file, cond ?? anchor),
+      children,
+    },
+    condition,
+  );
 }
 
 function collectStatements(scope: Scope, statements: SyntaxNode[]) {
@@ -336,13 +344,15 @@ function collectNode(scope: Scope, node: SyntaxNode): CallStep[] {
 
 function collectConditional(scope: Scope, node: SyntaxNode) {
   const keyword = keywordToken(node, ["if", "unless"]) ?? "if";
+  const cond = conditionOf(node);
   const head = branchStep(
     scope,
     keyword,
     keyword,
-    conditionOf(node),
+    cond,
     node,
     collectBlock(scope, childByType(node, "block")),
+    collectTestCalls(scope, cond),
   );
   const clauses = namedChildren(node).flatMap((clause) =>
     collectClause(scope, clause),
@@ -354,13 +364,15 @@ function collectConditional(scope: Scope, node: SyntaxNode) {
 // elsif chains nest in the CST
 function collectClause(scope: Scope, clause: SyntaxNode): CallStep[] {
   if (clause.type === "elsif") {
+    const cond = conditionOf(clause);
     const head = branchStep(
       scope,
       "else-if",
       "elsif",
-      conditionOf(clause),
+      cond,
       clause,
       collectBlock(scope, childByType(clause, "block")),
+      collectTestCalls(scope, cond),
     );
     const nested = namedChildren(clause).flatMap((next) =>
       collectClause(scope, next),
@@ -384,7 +396,22 @@ function collectPostfixConditional(scope: Scope, node: SyntaxNode) {
   const children =
     expression === undefined ? [] : collectExpression(scope, expression);
 
-  return [branchStep(scope, keyword, keyword, condition, node, children)];
+  return [
+    branchStep(
+      scope,
+      keyword,
+      keyword,
+      condition,
+      node,
+      children,
+      collectTestCalls(scope, condition),
+    ),
+  ];
+}
+
+function collectTestCalls(scope: Scope, cond: SyntaxNode | null): CallStep[] {
+  if (cond === null) return [];
+  return collectExpression(scope, cond);
 }
 
 // keyword tokens precede blocks; catch var left out of keys (not rename-stable)

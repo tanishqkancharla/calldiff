@@ -23,6 +23,33 @@ export interface CallNode {
   file?: string;
   line?: number;
   endLine?: number;
+  /**
+   * Did this call resolve to a definition in the indexed tree?
+   *
+   * Present on call nodes, absent on branches, which are not calls. Without it
+   * a childless leaf is three different facts in one shape: an unresolved
+   * callee (builtin, external package, dynamic), a resolved definition whose
+   * body was cut off by `--max-depth`, and a resolved definition that makes no
+   * calls. The resolver knows which; only the ASCII reader can afford not to.
+   */
+  resolved?: boolean;
+  /** Where that definition is declared. Present iff `resolved`. */
+  declaredIn?: SourceLoc;
+  /** Children omitted because `--max-depth` was reached, not because there are none. */
+  truncated?: true;
+  /** Re-entry into a definition already on the stack (rendered as a `⇄` suffix). */
+  recursive?: true;
+  /**
+   * Calls from a branch test / switch subject, as an expression tree
+   * (not inlined callee bodies).
+   *
+   * Not rendered in ASCII (`label` already shows the condition). `reach` walks
+   * these so `--to guard` and `--to foo` in `if (guard(foo(x)))` find that
+   * `if` line without a sibling next to the branch. Arm calls stay in
+   * `children`. Targets inside a condition callee's body still expand through
+   * the callee after the branch.
+   */
+  condition?: CallNode[];
   children: CallNode[];
 }
 
@@ -46,8 +73,25 @@ export type CallStep =
       file?: string;
       line?: number;
       endLine?: number;
+      /**
+       * Calls in the test / subject as an expression tree. Not ASCII children;
+       * `reach` walks these. Empty / omitted when the test has no calls
+       * (`if (x > 0)`). Nested `if (guard(foo(x)))` is `guard` with child `foo`.
+       */
+      condition?: CallStep[];
       children: CallStep[];
     };
+
+export type BranchStep = Extract<CallStep, { type: "branch" }>;
+
+/** Attach test/subject calls to a branch without emitting them as siblings. */
+export function branchWithCondition(
+  branch: BranchStep,
+  condition: CallStep[],
+): BranchStep {
+  if (condition.length === 0) return branch;
+  return { ...branch, condition };
+}
 
 export type DiffStatus = "same" | "added" | "removed";
 
@@ -125,6 +169,19 @@ export function assignOptionalTreeFields<
   if (source.file) target.file = source.file;
   if (source.line != null) target.line = source.line;
   if (source.endLine != null) target.endLine = source.endLine;
+  return target;
+}
+
+/** Copy call-resolution fields that `assignOptionalTreeFields` does not own. */
+export function assignOptionalResolutionFields(
+  target: CallNode,
+  source: CallNode,
+): CallNode {
+  if (source.resolved != null) target.resolved = source.resolved;
+  if (source.declaredIn) target.declaredIn = source.declaredIn;
+  if (source.truncated) target.truncated = source.truncated;
+  if (source.recursive) target.recursive = source.recursive;
+  if (source.condition?.length) target.condition = source.condition;
   return target;
 }
 

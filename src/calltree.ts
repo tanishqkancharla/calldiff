@@ -5,7 +5,12 @@ import {
   type FunctionIndex,
 } from "./extract.js";
 import { pickLoc } from "./loc.js";
-import type { CallNode, CallStep, FunctionInfo } from "./types.js";
+import type {
+  CallNode,
+  CallStep,
+  FunctionInfo,
+  SourceLoc,
+} from "./types.js";
 
 /** Normalize user-facing paths for entry matching (`\` → `/`, strip `./`). */
 export function normalizeEntryPath(entry: string): string {
@@ -132,6 +137,43 @@ function displayCallLabel(
   return key.includes("(") ? key : `${key}()`;
 }
 
+/**
+ * Convert a branch test / switch subject to CallNodes without inlining
+ * callee bodies. Nested argument calls stay as expression children so
+ * `reach --to foo` in `if (guard(foo(x)))` can stop at the `if` line.
+ * Function bodies are walked separately in `collectPathsTo`.
+ */
+function expandConditionExpr(
+  steps: CallStep[],
+  index: FunctionIndex,
+  owner?: FunctionInfo,
+): CallNode[] {
+  return steps.map((step) => {
+    if (step.type === "branch") {
+      const node: CallNode = {
+        key: step.key,
+        label: step.label,
+        kind: "branch",
+        ...pickLoc(step),
+        children: expandConditionExpr(step.children, index, owner),
+      };
+      if (step.condition?.length) {
+        node.condition = expandConditionExpr(step.condition, index, owner);
+      }
+      return node;
+    }
+    const info = resolveCall(step.key, index, step, owner);
+    const node: CallNode = {
+      key: step.key,
+      label: displayCallLabel(step.key, index, info),
+      kind: "call",
+      ...pickLoc(step),
+      children: expandConditionExpr(step.children ?? [], index, owner),
+    };
+    return node;
+  });
+}
+
 function expandSteps(
   steps: CallStep[],
   index: FunctionIndex,
@@ -143,7 +185,7 @@ function expandSteps(
 ): CallNode[] {
   return steps.map((step) => {
     if (step.type === "branch") {
-      return {
+      const node: CallNode = {
         key: step.key,
         label: step.label,
         kind: "branch" as const,
@@ -157,6 +199,10 @@ function expandSteps(
           owner,
         ),
       };
+      if (step.condition?.length) {
+        node.condition = expandConditionExpr(step.condition, index, owner);
+      }
+      return node;
     }
     return expandCall(
       step.key,
@@ -171,6 +217,11 @@ function expandSteps(
     );
   });
 }
+
+type CallResolution = {
+  resolved: boolean;
+  declaredIn?: SourceLoc;
+};
 
 function expandCall(
   key: string,
@@ -188,6 +239,16 @@ function expandCall(
   const info = infoOverride ?? resolveCall(key, index, callSite, owner);
   const label = displayCallLabel(key, index, info);
 
+  // State the resolver computes anyway. Carried onto the node so a consumer can
+  // tell "no calls beneath it" from "not resolvable" from "cut off by the depth
+  // cap" without re-running at a deeper `--max-depth` and diffing the results.
+  const resolution: CallResolution = {
+    resolved: info !== undefined,
+  };
+  if (info?.line != null) {
+    resolution.declaredIn = { file: info.file, line: info.line };
+  }
+
   // Recursion is per definition, not per name: two same-named functions in
   // different files calling each other is not a cycle.
   const token = info ? fileScopedKey(info.file, info.key) : key;
@@ -199,11 +260,22 @@ function expandCall(
       : pickLoc(callSite);
 
   if (depth >= maxDepth) {
-    return { key, label, kind: "call", ...loc, children: [] };
+    const hasBody =
+      Boolean(info?.steps.length) || Boolean(inlineChildren?.length);
+    const node: CallNode = {
+      key,
+      label,
+      kind: "call",
+      ...loc,
+      ...resolution,
+      children: [],
+    };
+    if (hasBody) node.truncated = true;
+    return node;
   }
 
   if (!info && !inlineChildren?.length) {
-    return { key, label, kind: "call", ...loc, children: [] };
+    return { key, label, kind: "call", ...loc, ...resolution, children: [] };
   }
 
   if (info && visiting.has(token)) {
@@ -216,6 +288,8 @@ function expandCall(
       label: `${label} ⇄`,
       kind: "call",
       ...loc,
+      ...resolution,
+      recursive: true,
       children: callSiteChildren,
     };
   }
@@ -234,6 +308,7 @@ function expandCall(
     label,
     kind: "call",
     ...loc,
+    ...resolution,
     children: [...bodyChildren, ...callSiteChildren],
   };
 }

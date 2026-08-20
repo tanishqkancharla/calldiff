@@ -134,7 +134,14 @@ TypeScript, TSX, JavaScript, JSX, Python, Go, Rust, Java, Ruby, C, C++, C#, PHP,
 3. Builds per-function callee lists and expands them into call trees
 4. Diffs the trees, prints a tree, or searches paths — plus structured output for agents
 
-Grammars install on first use (override cache with `CALLDIFF_GRAMMAR_CACHE`). This is syntactic (AST-based), not a full typechecker — dynamic calls won’t resolve.
+This is syntactic (AST-based), not a full typechecker — dynamic calls won’t resolve.
+
+### Grammars
+
+`tree-sitter-typescript` and `tree-sitter-javascript` are dependencies, so TypeScript, TSX, JavaScript and JSX work with nothing else installed. The other 20 grammar packages — every other language of the 23 — are fetched from npm on first use and built natively into `~/.cache/calldiff/grammars` (a few MB each).
+
+- `CALLDIFF_GRAMMAR_CACHE=<dir>` — install somewhere else.
+- `--offline` (or `CALLDIFF_OFFLINE=1`) — never install. A file whose grammar is missing is skipped with one warning on stderr, and every language that *can* be parsed still answers, so a mixed repository degrades per file rather than failing outright.
 
 ## Dev
 

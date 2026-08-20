@@ -2,7 +2,11 @@
  * Zig callable extraction (@tree-sitter-grammars/tree-sitter-zig).
  * Note: legacy `tree-sitter-zig` (nan) is incompatible with tree-sitter 0.25+.
  */
-import type { CallStep, FunctionInfo } from "../types.js";
+import {
+  branchWithCondition,
+  type CallStep,
+  type FunctionInfo,
+} from "../types.js";
 import {
   childByType,
   collapseWs,
@@ -99,13 +103,18 @@ function collectStatements(
         ) ?? null;
       const elseClause = childByType(node, "else_clause");
       const condText = cond ? collapseWs(cond.text) : "";
-      steps.push({
-        type: "branch",
-        key: condText ? `if:${condText}` : "if",
-        label: condText ? `if ${condText}` : "if",
-        ...locFromNode(file, cond ?? node),
-        children: collectStatements(file, statementsOf(thenBlock), typeName),
-      });
+      steps.push(
+        branchWithCondition(
+          {
+            type: "branch",
+            key: condText ? `if:${condText}` : "if",
+            label: condText ? `if ${condText}` : "if",
+            ...locFromNode(file, cond ?? node),
+            children: collectStatements(file, statementsOf(thenBlock), typeName),
+          },
+          cond ? collectStatements(file, [cond], typeName) : [],
+        ),
+      );
       if (elseClause) {
         // else_clause → block | labeled_statement → block | if_statement
         const elseBody =
@@ -177,6 +186,10 @@ function collectStatements(
     }
 
     if (node.type === "switch_expression") {
+      const subject =
+        namedChildren(node).find((c) => c.type !== "switch_case") ?? null;
+      const subjectText = subject ? collapseWs(subject.text) : "";
+      const cases: CallStep[] = [];
       for (const clause of namedChildren(node)) {
         if (clause.type !== "switch_case") continue;
         const kids = namedChildren(clause);
@@ -192,7 +205,7 @@ function collectStatements(
           kids.find((c) => c !== bodyNode) ?? null;
         const isElse = !pattern;
         const text = pattern ? collapseWs(pattern.text) : "";
-        steps.push({
+        cases.push({
           type: "branch",
           key: isElse ? "else" : text ? `case:${text}` : "case",
           label: isElse ? "else" : text ? `case ${text}` : "case",
@@ -202,6 +215,18 @@ function collectStatements(
             : [],
         });
       }
+      steps.push(
+        branchWithCondition(
+          {
+            type: "branch",
+            key: subjectText ? `switch:${subjectText}` : "switch",
+            label: subjectText ? `switch ${subjectText}` : "switch",
+            ...locFromNode(file, subject ?? node),
+            children: cases,
+          },
+          subject ? collectStatements(file, [subject], typeName) : [],
+        ),
+      );
       return;
     }
 

@@ -23,12 +23,13 @@ function grammarKey(npmPackage: string, grammarExport?: string): string {
 function loadLanguage(
   npmPackage: string,
   grammarExport?: string,
+  languageId?: string,
 ): GrammarLanguage {
   const key = grammarKey(npmPackage, grammarExport);
   const cached = languageCache.get(key);
   if (cached) return cached;
 
-  const mod = loadGrammarPackage(npmPackage);
+  const mod = loadGrammarPackage(npmPackage, languageId);
   const language = resolveLanguage(mod, grammarExport);
   languageCache.set(key, language);
   return language;
@@ -44,6 +45,7 @@ export function extractFunctions(
   const language = loadLanguage(
     extractor.grammarPackage,
     extractor.grammarExport,
+    extractor.id,
   );
   // Grammar package exports are accepted by setLanguage at runtime; the
   // published Language type requires fields not present on every package.

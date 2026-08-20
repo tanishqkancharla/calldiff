@@ -21,7 +21,15 @@ Helpers: `namedChildren`, `childByType`, `collapseWs` from `./types.js`.
 1. Free functions + type/class methods
 2. Calls: bare + member/receiver (`self`/`this`/recv → `Type.method`)
 3. Constructors / `new` analogue when the language has one
-4. if/else (and elif if present) as branches with source-text labels
+4. if/else (and elif if present) as branches with source-text labels. Walk the
+   test for calls and store them on the branch's `condition` (not as sibling
+   steps): `if (guard(x))` is one node whose identity includes `guard`, and
+   whose `children` are only the arm. Nested test calls belong in that
+   expression tree (`if (guard(foo(x)))` → `guard` with child `foo`). ASCII
+   still prints the label plus the arm; `reach --to guard` and `--to foo` both
+   find that `if` line. Same for a switch/match subject — wrap cases in a
+   `switch`/`match` branch whose `condition` is the subject. Loops
+   (`while (guard(x))`) are not branches, so the test is an ordinary call child.
 5. Nested function/lambda bodies NOT attributed to the outer caller. Argument calls and callback bodies belong under the receiving call.
 6. Ignore computed/dynamic callees when obvious
 

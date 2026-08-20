@@ -1,7 +1,11 @@
 /**
  * PHP callable extraction (tree-sitter-php).
  */
-import type { CallStep, FunctionInfo } from "../types.js";
+import {
+  branchWithCondition,
+  type CallStep,
+  type FunctionInfo,
+} from "../types.js";
 import {
   childByType,
   collapseWs,
@@ -104,6 +108,12 @@ function collectStatements(
     steps.push({ type: "call", key, ...locFromNode(file, node) });
   };
 
+  /** Calls in a branch test — stored on `condition`, not as siblings. */
+  const collectTestCalls = (test: SyntaxNode | null): CallStep[] => {
+    if (!test) return [];
+    return collectStatements(file, [test], className);
+  };
+
   const walk = (node: SyntaxNode): void => {
     if (
       node.type === "function_definition" ||
@@ -130,21 +140,26 @@ function collectStatements(
         ) ??
         null;
       const text = condText(cond);
-      steps.push({
-        type: "branch",
-        key: text ? `if:${text}` : "if",
-        label: text ? `if ${text}` : "if",
-        ...locFromNode(file, cond ?? node),
-        children: consequent
-          ? collectStatements(
-              file,
-              consequent.type === "compound_statement"
-                ? namedChildren(consequent)
-                : [consequent],
-              className,
-            )
-          : [],
-      });
+      steps.push(
+        branchWithCondition(
+          {
+            type: "branch",
+            key: text ? `if:${text}` : "if",
+            label: text ? `if ${text}` : "if",
+            ...locFromNode(file, cond ?? node),
+            children: consequent
+              ? collectStatements(
+                  file,
+                  consequent.type === "compound_statement"
+                    ? namedChildren(consequent)
+                    : [consequent],
+                  className,
+                )
+              : [],
+          },
+          collectTestCalls(cond),
+        ),
+      );
 
       for (const child of namedChildren(node)) {
         if (child.type === "else_if_clause") {
@@ -158,21 +173,26 @@ function collectStatements(
               (c) => c.type !== "parenthesized_expression",
             ) ??
             null;
-          steps.push({
-            type: "branch",
-            key: elifText ? `else-if:${elifText}` : "else-if",
-            label: elifText ? `elseif ${elifText}` : "elseif",
-            ...locFromNode(file, elifCond ?? child),
-            children: elifCons
-              ? collectStatements(
-                  file,
-                  elifCons.type === "compound_statement"
-                    ? namedChildren(elifCons)
-                    : [elifCons],
-                  className,
-                )
-              : [],
-          });
+          steps.push(
+            branchWithCondition(
+              {
+                type: "branch",
+                key: elifText ? `else-if:${elifText}` : "else-if",
+                label: elifText ? `elseif ${elifText}` : "elseif",
+                ...locFromNode(file, elifCond ?? child),
+                children: elifCons
+                  ? collectStatements(
+                      file,
+                      elifCons.type === "compound_statement"
+                        ? namedChildren(elifCons)
+                        : [elifCons],
+                      className,
+                    )
+                  : [],
+              },
+              collectTestCalls(elifCond),
+            ),
+          );
           continue;
         }
         if (child.type !== "else_clause") continue;
@@ -198,21 +218,26 @@ function collectStatements(
                   c.type !== "else_if_clause",
               ) ??
               null;
-            steps.push({
-              type: "branch",
-              key: elifText ? `else-if:${elifText}` : "else-if",
-              label: elifText ? `elseif ${elifText}` : "elseif",
-              ...locFromNode(file, elifCond ?? elseClause),
-              children: elifCons
-                ? collectStatements(
-                    file,
-                    elifCons.type === "compound_statement"
-                      ? namedChildren(elifCons)
-                      : [elifCons],
-                    className,
-                  )
-                : [],
-            });
+            steps.push(
+              branchWithCondition(
+                {
+                  type: "branch",
+                  key: elifText ? `else-if:${elifText}` : "else-if",
+                  label: elifText ? `elseif ${elifText}` : "elseif",
+                  ...locFromNode(file, elifCond ?? elseClause),
+                  children: elifCons
+                    ? collectStatements(
+                        file,
+                        elifCons.type === "compound_statement"
+                          ? namedChildren(elifCons)
+                          : [elifCons],
+                        className,
+                      )
+                    : [],
+                },
+                collectTestCalls(elifCond),
+              ),
+            );
             // Nested if may have else_if_clause siblings too
             for (const nested of namedChildren(inner)) {
               if (nested.type === "else_if_clause") {
@@ -226,21 +251,26 @@ function collectStatements(
                     (c) => c.type !== "parenthesized_expression",
                   ) ??
                   null;
-                steps.push({
-                  type: "branch",
-                  key: nText ? `else-if:${nText}` : "else-if",
-                  label: nText ? `elseif ${nText}` : "elseif",
-                  ...locFromNode(file, nCond ?? nested),
-                  children: nBody
-                    ? collectStatements(
-                        file,
-                        nBody.type === "compound_statement"
-                          ? namedChildren(nBody)
-                          : [nBody],
-                        className,
-                      )
-                    : [],
-                });
+                steps.push(
+                  branchWithCondition(
+                    {
+                      type: "branch",
+                      key: nText ? `else-if:${nText}` : "else-if",
+                      label: nText ? `elseif ${nText}` : "elseif",
+                      ...locFromNode(file, nCond ?? nested),
+                      children: nBody
+                        ? collectStatements(
+                            file,
+                            nBody.type === "compound_statement"
+                              ? namedChildren(nBody)
+                              : [nBody],
+                            className,
+                          )
+                        : [],
+                    },
+                    collectTestCalls(nCond),
+                  ),
+                );
               }
             }
             elseClause = childByType(inner, "else_clause");

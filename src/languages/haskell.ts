@@ -1,7 +1,11 @@
 /**
  * Haskell callable extraction (tree-sitter-haskell).
  */
-import type { CallStep, FunctionInfo } from "../types.js";
+import {
+  branchWithCondition,
+  type CallStep,
+  type FunctionInfo,
+} from "../types.js";
 import {
   childByType,
   collapseWs,
@@ -75,7 +79,18 @@ function collectFromMatch(file: string, match: SyntaxNode | null): CallStep[] {
   return collectExpr(file, body);
 }
 
-function collectExpr(file: string, node: SyntaxNode): CallStep[] {
+function collectExpr(
+  file: string,
+  node: SyntaxNode,
+  /**
+   * Whether a bare `variable` counts as a nullary call. True in statement
+   * position, where `authStorageCreate;` really is one. False when walking a
+   * branch test: `if x == 1` would otherwise report a call to the parameter
+   * `x`. Applications inside the test (`null (sessionId options)`) are
+   * unambiguous and still collected either way.
+   */
+  nullaryVariables = true,
+): CallStep[] {
   const steps: CallStep[] = [];
   const seen = new Set<string>();
 
@@ -104,13 +119,18 @@ function collectExpr(file: string, node: SyntaxNode): CallStep[] {
       const thenE = kids[1] ?? null;
       const elseE = kids[2] ?? null;
       const condText = cond ? collapseWs(cond.text) : "";
-      steps.push({
-        type: "branch",
-        key: condText ? `if:${condText}` : "if",
-        label: condText ? `if ${condText}` : "if",
-        ...locFromNode(file, cond ?? n),
-        children: thenE ? collectExpr(file, thenE) : [],
-      });
+      steps.push(
+        branchWithCondition(
+          {
+            type: "branch",
+            key: condText ? `if:${condText}` : "if",
+            label: condText ? `if ${condText}` : "if",
+            ...locFromNode(file, cond ?? n),
+            children: thenE ? collectExpr(file, thenE) : [],
+          },
+          cond ? collectExpr(file, cond, false) : [],
+        ),
+      );
       if (elseE) {
         steps.push({
           type: "branch",
@@ -165,7 +185,12 @@ function collectExpr(file: string, node: SyntaxNode): CallStep[] {
 
     if (n.type === "variable") {
       // Bare variable used as expression in do-block is a call-ish nullary
-      if (n.text !== "return" && n.text !== "pure" && !isLikelyTypeName(n.text)) {
+      if (
+        nullaryVariables &&
+        n.text !== "return" &&
+        n.text !== "pure" &&
+        !isLikelyTypeName(n.text)
+      ) {
         addCall(n.text, n);
       }
       return;

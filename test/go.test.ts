@@ -204,10 +204,11 @@ test("go: else-if and switch as branches; skips nested funcs", () => {
     +    └─ DoExtra()
       ├─ else
          └─ DoC()
-      ├─ case 1
-         └─ DoA()
-      ├─ default
-         └─ DoC()
+      ├─ switch x
+         ├─ case 1
+            └─ DoA()
+         └─ default
+            └─ DoC()
     + └─ Flush()
   `));
 });
@@ -403,10 +404,11 @@ test("go: type switch as branches", () => {
   expect(result.code).toBe(0);
   expect(result.stdout).toContain(diffOutdent(`
       Handle(x)
-      ├─ case int
-         └─ DoInt()
-      ├─ default
-         └─ DoOther()
+      ├─ switch x
+         ├─ case int
+            └─ DoInt()
+         └─ default
+            └─ DoOther()
     + └─ Flush()
   `));
 });

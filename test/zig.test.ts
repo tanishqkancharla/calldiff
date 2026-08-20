@@ -249,10 +249,11 @@ test("zig: switch cases as branches", () => {
   expect(result.code).toBe(0);
   expect(result.stdout).toContain(diffOutdent(`
       handle(x)
-      ├─ case 1
-         └─ doA()
-      ├─ else
-         └─ doC()
+      ├─ switch x
+         ├─ case 1
+            └─ doA()
+         └─ else
+            └─ doC()
     + └─ flush()
   `));
 });

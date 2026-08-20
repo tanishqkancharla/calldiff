@@ -364,10 +364,11 @@ test("python: try/except/finally and match/case as branches", () => {
          └─ recover()
       ├─ finally
          └─ close()
-      ├─ case 1
-         └─ do_a()
-      ├─ case _
-         └─ do_other()
+      ├─ match x
+         ├─ case 1
+            └─ do_a()
+         └─ case _
+            └─ do_other()
     + └─ flush()
   `));
 });

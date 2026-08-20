@@ -10,7 +10,11 @@
  *   dot_index_expression.
  * - Nested/local function bodies are not attributed to the outer caller.
  */
-import type { CallStep, FunctionInfo } from "../types.js";
+import {
+  branchWithCondition,
+  type CallStep,
+  type FunctionInfo,
+} from "../types.js";
 import {
   childByType,
   collapseWs,
@@ -80,6 +84,11 @@ function collectStatements(
     steps.push({ type: "call", key, ...locFromNode(file, node) });
   };
 
+  const collectTestCalls = (test: SyntaxNode | null): CallStep[] => {
+    if (!test) return [];
+    return collectStatements(file, [test], typeName);
+  };
+
   const walk = (node: SyntaxNode): void => {
     if (
       node.type === "function_declaration" ||
@@ -99,30 +108,40 @@ function collectStatements(
             c.type !== "elseif_statement",
         ) ?? null;
       const condText = cond ? collapseWs(cond.text) : "";
-      steps.push({
-        type: "branch",
-        key: condText ? `if:${condText}` : "if",
-        label: condText ? `if ${condText}` : "if",
-        ...locFromNode(file, cond ?? node),
-        children: collectStatements(file, statementsOf(thenBlock), typeName),
-      });
+      steps.push(
+        branchWithCondition(
+          {
+            type: "branch",
+            key: condText ? `if:${condText}` : "if",
+            label: condText ? `if ${condText}` : "if",
+            ...locFromNode(file, cond ?? node),
+            children: collectStatements(file, statementsOf(thenBlock), typeName),
+          },
+          collectTestCalls(cond),
+        ),
+      );
 
       for (const clause of kids) {
         if (clause.type === "elseif_statement") {
           const elseifCond =
             namedChildren(clause).find((c) => c.type !== "block") ?? null;
           const text = elseifCond ? collapseWs(elseifCond.text) : "";
-          steps.push({
-            type: "branch",
-            key: text ? `else-if:${text}` : "else-if",
-            label: text ? `elseif ${text}` : "elseif",
-            ...locFromNode(file, elseifCond ?? clause),
-            children: collectStatements(
-              file,
-              statementsOf(childByType(clause, "block")),
-              typeName,
+          steps.push(
+            branchWithCondition(
+              {
+                type: "branch",
+                key: text ? `else-if:${text}` : "else-if",
+                label: text ? `elseif ${text}` : "elseif",
+                ...locFromNode(file, elseifCond ?? clause),
+                children: collectStatements(
+                  file,
+                  statementsOf(childByType(clause, "block")),
+                  typeName,
+                ),
+              },
+              collectTestCalls(elseifCond),
             ),
-          });
+          );
         }
         if (clause.type === "else_statement") {
           steps.push({

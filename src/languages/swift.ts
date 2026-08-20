@@ -1,7 +1,11 @@
 /**
  * Swift callable extraction (tree-sitter-swift).
  */
-import type { CallStep, FunctionInfo } from "../types.js";
+import {
+  branchWithCondition,
+  type CallStep,
+  type FunctionInfo,
+} from "../types.js";
 import {
   childByType,
   collapseWs,
@@ -105,17 +109,22 @@ function collectStatements(
     const kind = asElseIf ? "else-if" : "if";
     const labelKind = asElseIf ? "else if" : "if";
 
-    steps.push({
-      type: "branch",
-      key: condText ? `${kind}:${condText}` : kind,
-      label: condText ? `${labelKind} ${condText}` : labelKind,
-      ...locFromNode(file, cond ?? node),
-      children: collectStatements(
-        file,
-        statementsOf(stmtBlocks[0] ?? null),
-        className,
+    steps.push(
+      branchWithCondition(
+        {
+          type: "branch",
+          key: condText ? `${kind}:${condText}` : kind,
+          label: condText ? `${labelKind} ${condText}` : labelKind,
+          ...locFromNode(file, cond ?? node),
+          children: collectStatements(
+            file,
+            statementsOf(stmtBlocks[0] ?? null),
+            className,
+          ),
+        },
+        cond ? collectStatements(file, [cond], className) : [],
       ),
-    });
+    );
 
     if (nestedIf) {
       pushIfChain(nestedIf, true);
@@ -181,6 +190,10 @@ function collectStatements(
     }
 
     if (node.type === "switch_statement") {
+      const subject =
+        namedChildren(node).find((c) => c.type !== "switch_entry") ?? null;
+      const subjectText = subject ? collapseWs(subject.text) : "";
+      const cases: CallStep[] = [];
       for (const entry of namedChildren(node)) {
         if (entry.type !== "switch_entry") continue;
         const pattern = childByType(entry, "switch_pattern");
@@ -189,7 +202,7 @@ function collectStatements(
         );
         const body = childByType(entry, "statements");
         if (isDefault || !pattern) {
-          steps.push({
+          cases.push({
             type: "branch",
             key: "default",
             label: "default",
@@ -200,7 +213,7 @@ function collectStatements(
           });
         } else {
           const text = collapseWs(pattern.text);
-          steps.push({
+          cases.push({
             type: "branch",
             key: text ? `case:${text}` : "case",
             label: text ? `case ${text}` : "case",
@@ -211,6 +224,18 @@ function collectStatements(
           });
         }
       }
+      steps.push(
+        branchWithCondition(
+          {
+            type: "branch",
+            key: subjectText ? `switch:${subjectText}` : "switch",
+            label: subjectText ? `switch ${subjectText}` : "switch",
+            ...locFromNode(file, subject ?? node),
+            children: cases,
+          },
+          subject ? collectStatements(file, [subject], className) : [],
+        ),
+      );
       return;
     }
 

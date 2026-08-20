@@ -28,8 +28,13 @@ export type WorkspaceHost = {
    *
    * Accepts either a full command string (`"calldiff reach -e foo --to bar"`)
    * or argv without the binary (`"reach -e foo --to bar"` / `["reach", ...]`).
+   * `env` overrides variables for that one run, e.g. a scratch
+   * `CALLDIFF_GRAMMAR_CACHE`.
    */
-  run: (command: string | string[]) => RunResult;
+  run: (
+    command: string | string[],
+    options?: { env?: Record<string, string> },
+  ) => RunResult;
   /** Write (or overwrite) files relative to the workspace root. */
   write: (files: Record<string, string>) => void;
   /** Delete a file relative to the workspace root. */
@@ -105,7 +110,7 @@ export function workspace(files: Record<string, string> = {}): WorkspaceHost {
       git(root, args);
       return git(root, ["rev-parse", "HEAD"]).trim();
     },
-    run(command) {
+    run(command, options) {
       const args = normalizeArgv(command);
       const result = spawnSync(process.execPath, [tsxCli, calldiffCli, ...args], {
         cwd: root,
@@ -120,6 +125,7 @@ export function workspace(files: Record<string, string> = {}): WorkspaceHost {
           GIT_TERMINAL_PROMPT: "0",
           GIT_CONFIG_GLOBAL: "/dev/null",
           GIT_CONFIG_NOSYSTEM: "1",
+          ...options?.env,
         },
       });
       return {

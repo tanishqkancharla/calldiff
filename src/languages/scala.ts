@@ -1,7 +1,11 @@
 /**
  * Scala callable extraction (tree-sitter-scala).
  */
-import type { CallStep, FunctionInfo } from "../types.js";
+import {
+  branchWithCondition,
+  type CallStep,
+  type FunctionInfo,
+} from "../types.js";
 import {
   childByType,
   collapseWs,
@@ -105,17 +109,22 @@ function collectStatements(
     const kind = asElseIf ? "else-if" : "if";
     const labelKind = asElseIf ? "else if" : "if";
 
-    steps.push({
-      type: "branch",
-      key: condText ? `${kind}:${condText}` : kind,
-      label: condText ? `${labelKind} (${condText})` : labelKind,
-      ...locFromNode(file, condInner ?? node),
-      children: collectStatements(
-        file,
-        statementsOf(blocks[0] ?? null),
-        typeName,
+    steps.push(
+      branchWithCondition(
+        {
+          type: "branch",
+          key: condText ? `${kind}:${condText}` : kind,
+          label: condText ? `${labelKind} (${condText})` : labelKind,
+          ...locFromNode(file, condInner ?? node),
+          children: collectStatements(
+            file,
+            statementsOf(blocks[0] ?? null),
+            typeName,
+          ),
+        },
+        condInner ? collectStatements(file, [condInner], typeName) : [],
       ),
-    });
+    );
 
     if (nestedIf) {
       pushIfChain(nestedIf, true);
@@ -208,6 +217,10 @@ function collectStatements(
     }
 
     if (node.type === "match_expression") {
+      const subject =
+        namedChildren(node).find((c) => c.type !== "case_block") ?? null;
+      const subjectText = subject ? collapseWs(subject.text) : "";
+      const cases: CallStep[] = [];
       const caseBlock = childByType(node, "case_block");
       for (const clause of caseBlock ? namedChildren(caseBlock) : []) {
         if (clause.type !== "case_clause") continue;
@@ -215,7 +228,7 @@ function collectStatements(
         const pattern = kids[0] ?? null;
         const text = pattern ? collapseWs(pattern.text) : "";
         const bodyNodes = kids.slice(1);
-        steps.push({
+        cases.push({
           type: "branch",
           key: text ? `case:${text}` : "case",
           label: text ? `case ${text}` : "case",
@@ -223,6 +236,18 @@ function collectStatements(
           children: collectStatements(file, bodyNodes, typeName),
         });
       }
+      steps.push(
+        branchWithCondition(
+          {
+            type: "branch",
+            key: subjectText ? `match:${subjectText}` : "match",
+            label: subjectText ? `match ${subjectText}` : "match",
+            ...locFromNode(file, subject ?? node),
+            children: cases,
+          },
+          subject ? collectStatements(file, [subject], typeName) : [],
+        ),
+      );
       return;
     }
 

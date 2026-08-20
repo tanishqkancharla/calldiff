@@ -329,10 +329,11 @@ test("kotlin: try/catch/finally and when as branches", () => {
          └─ recover()
       ├─ finally
          └─ closeIt()
-      ├─ case 1
-         └─ doA()
-      ├─ else
-         └─ doOther()
+      ├─ when (x)
+         ├─ case 1
+            └─ doA()
+         └─ else
+            └─ doOther()
     + └─ flush()
   `));
 });

@@ -47,15 +47,97 @@ export function hasTokenFlag(argv: string[]): boolean {
  */
 let tokenFlagActive = false;
 
-/** Strip lone `--` so `calldiff a b -- src` still works with incur. */
+/** Long/short spellings of the options that may be repeated. */
+const REPEATABLE = {
+  entry: ["--entry", "-e"],
+  file: ["--file", "-F"],
+} as const;
+
+type Repeatable = keyof typeof REPEATABLE;
+
+/**
+ * Values of repeated `--entry` / `--file` flags, in the order written.
+ *
+ * Both options are declared `z.union([z.string(), z.array(z.string())])` so a
+ * structured caller (MCP, HTTP) can send either shape, and incur's parser only
+ * accumulates repeats for a field whose *own* type is `z.array` — a union is
+ * not one, so `-e a -e b` overwrote and silently kept `b`. Narrowing the schema
+ * to an array would fix the CLI by breaking every caller that passes a bare
+ * string, so the repeats are collected here instead and the published schema
+ * stays true. Collected per `normalizeArgv` call; empty for non-argv callers,
+ * who keep going through the parsed option.
+ */
+type RepeatedOptions = {
+  entry: string[];
+  file: string[];
+};
+
+let repeatedOptions: RepeatedOptions = { entry: [], file: [] };
+
+/**
+ * Strip lone `--` so `calldiff a b -- src` still works with incur, and record
+ * repeated `--entry` / `--file` values.
+ */
 export function normalizeArgv(argv: string[]): string[] {
   tokenFlagActive = hasTokenFlag(argv);
-  return argv.filter((token) => token !== "--");
+  const tokens = argv.filter((token) => token !== "--");
+  repeatedOptions = collectRepeated(tokens);
+  return tokens;
+}
+
+const REPEATABLE_ENTRIES: Array<[Repeatable, readonly string[]]> = [
+  ["entry", REPEATABLE.entry],
+  ["file", REPEATABLE.file],
+];
+
+/**
+ * Scan post-`--`-strip tokens for repeated option values, matching how incur
+ * reads them: `--flag value`, `--flag=value`, `-f value`. `-f=value` is not a
+ * form incur accepts, so it is not one here either.
+ *
+ * One left-to-right pass, consuming each value as it goes, so that a value
+ * spelled like a flag (`--file -e`) is not read as one. Values of options this
+ * function does not know about are not skipped, which only matters if one is
+ * literally `-e` or `--entry`.
+ */
+export function collectRepeated(tokens: string[]): RepeatedOptions {
+  const found: RepeatedOptions = { entry: [], file: [] };
+
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i]!;
+
+    const exact = REPEATABLE_ENTRIES.find(([, spellings]) =>
+      spellings.includes(token),
+    );
+    if (exact) {
+      const value = tokens[i + 1];
+      if (value !== undefined) {
+        found[exact[0]].push(value);
+        i += 1;
+      }
+      continue;
+    }
+
+    for (const [name, spellings] of REPEATABLE_ENTRIES) {
+      const long = spellings.find(
+        (flag) => flag.startsWith("--") && token.startsWith(`${flag}=`),
+      );
+      if (long) {
+        found[name].push(token.slice(long.length + 1));
+        break;
+      }
+    }
+  }
+
+  return found;
 }
 
 function entriesFromOption(
   entry: string | string[] | undefined,
+  name: Repeatable,
 ): string[] | undefined {
+  const repeated = repeatedOptions[name];
+  if (repeated.length > 0) return repeated;
   if (entry === undefined) return undefined;
   return Array.isArray(entry) ? entry : [entry];
 }
@@ -134,6 +216,18 @@ const locsOption = z
   .default(false)
   .describe("Show call-site source locations (file:line)");
 
+/**
+ * Optional rather than `.default(false)` on purpose: absent has to stay
+ * distinguishable from `--no-offline`, so that an unset flag falls through to
+ * `CALLDIFF_OFFLINE` instead of silently overriding it.
+ */
+const offlineOption = z
+  .boolean()
+  .optional()
+  .describe(
+    "Never install a tree-sitter grammar; skip files whose grammar is missing",
+  );
+
 const pathsArg = z
   .array(z.string())
   .optional()
@@ -166,6 +260,7 @@ export const cli = Cli.create("calldiff", {
       file: fileOption.optional(),
       maxDepth: maxDepthOption,
       locs: locsOption,
+      offline: offlineOption,
       from: z.string().optional().describe('Left / "before" tree'),
       to: z.string().optional().describe('Right / "after" tree'),
     }),
@@ -202,8 +297,8 @@ export const cli = Cli.create("calldiff", {
     ],
     hint: "Semantics match git diff: no refs → HEAD vs worktree; one ref → that vs worktree; two refs → compare those trees.",
     run(c) {
-      const entries = entriesFromOption(c.options.entry);
-      const files = entriesFromOption(c.options.file);
+      const entries = entriesFromOption(c.options.entry, "entry");
+      const files = entriesFromOption(c.options.file, "file");
       let result: DiffResult;
       try {
         result = runDiff({
@@ -214,6 +309,7 @@ export const cli = Cli.create("calldiff", {
           paths: c.args.paths,
           maxDepth: c.options.maxDepth,
           locs: c.options.locs,
+          offline: c.options.offline,
           color: !c.formatExplicit && !c.agent,
         });
       } catch (error) {
@@ -254,6 +350,7 @@ export const cli = Cli.create("calldiff", {
       file: fileOption.optional(),
       maxDepth: maxDepthOption,
       locs: locsOption,
+      offline: offlineOption,
     }),
     alias: { entry: "e", file: "F" },
     examples: [
@@ -272,8 +369,8 @@ export const cli = Cli.create("calldiff", {
       },
     ],
     run(c) {
-      const entries = entriesFromOption(c.options.entry) ?? [];
-      const files = entriesFromOption(c.options.file) ?? [];
+      const entries = entriesFromOption(c.options.entry, "entry") ?? [];
+      const files = entriesFromOption(c.options.file, "file") ?? [];
       if (entries.length === 0 && files.length === 0) {
         return c.error({
           code: "MISSING_ENTRY",
@@ -290,6 +387,7 @@ export const cli = Cli.create("calldiff", {
           paths: c.args.paths,
           maxDepth: c.options.maxDepth,
           locs: c.options.locs,
+          offline: c.options.offline,
           color: !c.formatExplicit && !c.agent,
         });
         return emitAsciiOrData(c, result);
@@ -319,6 +417,7 @@ export const cli = Cli.create("calldiff", {
         .describe("Target symbol to reach (functionName or ClassName.method)"),
       maxDepth: maxDepthOption,
       locs: locsOption,
+      offline: offlineOption,
     }),
     alias: { entry: "e", file: "F" },
     examples: [
@@ -337,8 +436,8 @@ export const cli = Cli.create("calldiff", {
       },
     ],
     run(c) {
-      const entries = entriesFromOption(c.options.entry) ?? [];
-      const files = entriesFromOption(c.options.file) ?? [];
+      const entries = entriesFromOption(c.options.entry, "entry") ?? [];
+      const files = entriesFromOption(c.options.file, "file") ?? [];
       if (entries.length === 0 && files.length === 0) {
         return c.error({
           code: "MISSING_ENTRY",
@@ -363,6 +462,7 @@ export const cli = Cli.create("calldiff", {
           paths: c.args.paths,
           maxDepth: c.options.maxDepth,
           locs: c.options.locs,
+          offline: c.options.offline,
           color: !c.formatExplicit && !c.agent,
         });
         return emitAsciiOrData(c, result);

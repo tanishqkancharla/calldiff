@@ -292,10 +292,11 @@ test("rust: match arms as branches", () => {
   expect(result.code).toBe(0);
   expect(result.stdout).toContain(diffOutdent(`
       boot(x)
-      ├─ case 1
-         └─ do_a()
-      ├─ case _
-         └─ do_other()
+      ├─ match x
+         ├─ case 1
+            └─ do_a()
+         └─ case _
+            └─ do_other()
     + └─ flush()
   `));
 });

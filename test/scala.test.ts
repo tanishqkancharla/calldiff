@@ -343,10 +343,11 @@ test("scala: try/catch/finally and match as branches", () => {
          └─ Ctrl.recover()
       ├─ finally
          └─ Ctrl.closeIt()
-      ├─ case 1
-         └─ Ctrl.doA()
-      ├─ case _
-         └─ Ctrl.doOther()
+      ├─ match x
+         ├─ case 1
+            └─ Ctrl.doA()
+         └─ case _
+            └─ Ctrl.doOther()
     + └─ Ctrl.flush()
   `));
 });

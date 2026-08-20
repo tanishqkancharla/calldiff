@@ -22,6 +22,7 @@ import {
   inferEntries,
   resolveExplicitDiffEntries,
 } from "./infer.js";
+import { setGrammarOffline } from "./languages/grammars.js";
 import { collectPathsTo, findReachPaths } from "./reach.js";
 import { renderDiff, renderTree } from "./render.js";
 import type { ExtractionCache, FunctionIndex } from "./extract.js";
@@ -35,7 +36,10 @@ import type {
   Snapshot,
   TreeResult,
 } from "./types.js";
-import { assignOptionalTreeFields } from "./types.js";
+import {
+  assignOptionalResolutionFields,
+  assignOptionalTreeFields,
+} from "./types.js";
 
 export type DiffRunOptions = {
   from?: string;
@@ -51,6 +55,8 @@ export type DiffRunOptions = {
   color?: boolean;
   /** When true, append file:line suffixes in ascii. Default: false */
   locs?: boolean;
+  /** Decline the on-demand grammar install. Unset falls back to CALLDIFF_OFFLINE. */
+  offline?: boolean;
 };
 
 export type TreeRunOptions = {
@@ -62,6 +68,8 @@ export type TreeRunOptions = {
   maxDepth?: number;
   color?: boolean;
   locs?: boolean;
+  /** Decline the on-demand grammar install. Unset falls back to CALLDIFF_OFFLINE. */
+  offline?: boolean;
 };
 
 export type ReachRunOptions = {
@@ -77,6 +85,8 @@ export type ReachRunOptions = {
   maxDepth?: number;
   color?: boolean;
   locs?: boolean;
+  /** Decline the on-demand grammar install. Unset falls back to CALLDIFF_OFFLINE. */
+  offline?: boolean;
 };
 
 function loadIndex(
@@ -188,7 +198,12 @@ function serializeCallNode(node: CallNode): CallNode {
     label: node.label,
     children: node.children.map(serializeCallNode),
   };
-  return assignOptionalTreeFields(serialized, node);
+  assignOptionalTreeFields(serialized, node);
+  assignOptionalResolutionFields(serialized, node);
+  if (node.condition?.length) {
+    serialized.condition = node.condition.map(serializeCallNode);
+  }
+  return serialized;
 }
 
 function serializeDiffNode(node: DiffNode): DiffNode {
@@ -211,6 +226,7 @@ export function runDiff(options: DiffRunOptions = {}): DiffResult {
   const locs = options.locs === true;
   const hasExplicit = entriesOpt.length > 0 || filesOpt.length > 0;
 
+  setGrammarOffline(options.offline);
   assertGitRepo(cwd);
 
   const {
@@ -325,6 +341,7 @@ export function runTree(options: TreeRunOptions): TreeResult {
   const symbols = options.entries ?? [];
   const files = options.files ?? [];
 
+  setGrammarOffline(options.offline);
   assertGitRepo(cwd);
 
   const { snapshot, paths } = resolveSnapshotAndPaths(
@@ -370,6 +387,7 @@ export function runReach(options: ReachRunOptions): ReachResult {
   const symbols = options.entries ?? [];
   const files = options.files ?? [];
 
+  setGrammarOffline(options.offline);
   assertGitRepo(cwd);
 
   const { snapshot, paths } = resolveSnapshotAndPaths(
@@ -407,7 +425,13 @@ export function runReach(options: ReachRunOptions): ReachResult {
   for (const info of resolveFileInfos(index, files)) {
     if (!entryKeys.includes(info.key)) entryKeys.push(info.key);
     const tree = buildCallTreeFromInfo(info, index, maxDepth);
-    for (const path of collectPathsTo(tree, targetKey, options.to)) {
+    for (const path of collectPathsTo(
+      tree,
+      targetKey,
+      options.to,
+      index,
+      maxDepth,
+    )) {
       pathResults.push({
         ascii: renderTree(path, { color: false, locs }),
         tree: serializeCallNode(path),

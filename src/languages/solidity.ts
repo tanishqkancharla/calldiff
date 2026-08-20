@@ -1,7 +1,11 @@
 /**
  * Solidity callable extraction (tree-sitter-solidity).
  */
-import type { CallStep, FunctionInfo } from "../types.js";
+import {
+  branchWithCondition,
+  type CallStep,
+  type FunctionInfo,
+} from "../types.js";
 import {
   childByType,
   collapseWs,
@@ -123,15 +127,20 @@ function collectStatements(
       const condText = cond ? collapseWs(cond.text) : "";
       const thenNode = bodies[0] ? unwrapStatement(bodies[0]) : null;
       const elseNode = bodies[1] ? unwrapStatement(bodies[1]) : null;
-      steps.push({
-        type: "branch",
-        key: condText ? `if:${condText}` : "if",
-        label: condText ? `if ${condText}` : "if",
-        ...locFromNode(file, cond ?? node),
-        children: thenNode
-          ? collectStatements(file, statementsOf(thenNode), contractName)
-          : [],
-      });
+      steps.push(
+        branchWithCondition(
+          {
+            type: "branch",
+            key: condText ? `if:${condText}` : "if",
+            label: condText ? `if ${condText}` : "if",
+            ...locFromNode(file, cond ?? node),
+            children: thenNode
+              ? collectStatements(file, statementsOf(thenNode), contractName)
+              : [],
+          },
+          cond ? collectStatements(file, [cond], contractName) : [],
+        ),
+      );
       if (elseNode) {
         if (elseNode.type === "if_statement") {
           const nested = collectStatements(file, [elseNode], contractName);

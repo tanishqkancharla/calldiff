@@ -1,7 +1,11 @@
 /**
  * Rust callable extraction (tree-sitter-rust).
  */
-import type { CallStep, FunctionInfo } from "../types.js";
+import {
+  branchWithCondition,
+  type CallStep,
+  type FunctionInfo,
+} from "../types.js";
 import {
   childByType,
   collapseWs,
@@ -122,15 +126,20 @@ function collectStatements(
     const kind = asElseIf ? "else-if" : "if";
     const labelKind = asElseIf ? "else if" : "if";
 
-    steps.push({
-      type: "branch",
-      key: condText ? `${kind}:${condText}` : kind,
-      label: condText ? `${labelKind} ${condText}` : labelKind,
-      ...locFromNode(file, cond ?? node),
-      children: thenBlock
-        ? collectStatements(file, statementsOf(thenBlock), typeName)
-        : [],
-    });
+    steps.push(
+      branchWithCondition(
+        {
+          type: "branch",
+          key: condText ? `${kind}:${condText}` : kind,
+          label: condText ? `${labelKind} ${condText}` : labelKind,
+          ...locFromNode(file, cond ?? node),
+          children: thenBlock
+            ? collectStatements(file, statementsOf(thenBlock), typeName)
+            : [],
+        },
+        cond ? collectStatements(file, [cond], typeName) : [],
+      ),
+    );
 
     if (!elseClause) return;
     const elseInner = elseClause.namedChild(0);
@@ -165,6 +174,10 @@ function collectStatements(
     }
 
     if (node.type === "match_expression") {
+      const subject =
+        namedChildren(node).find((c) => c.type !== "match_block") ?? null;
+      const subjectText = subject ? collapseWs(subject.text) : "";
+      const cases: CallStep[] = [];
       const block = childByType(node, "match_block");
       for (const arm of block ? namedChildren(block) : []) {
         if (arm.type !== "match_arm") continue;
@@ -186,7 +199,7 @@ function collectStatements(
         );
         const body = kids.length > 1 ? kids[kids.length - 1]! : null;
         const text = pattern ? collapseWs(pattern.text) : "";
-        steps.push({
+        cases.push({
           type: "branch",
           key: text ? `case:${text}` : "case",
           label: text ? `case ${text}` : "case",
@@ -196,6 +209,18 @@ function collectStatements(
             : [],
         });
       }
+      steps.push(
+        branchWithCondition(
+          {
+            type: "branch",
+            key: subjectText ? `match:${subjectText}` : "match",
+            label: subjectText ? `match ${subjectText}` : "match",
+            ...locFromNode(file, subject ?? node),
+            children: cases,
+          },
+          subject ? collectStatements(file, [subject], typeName) : [],
+        ),
+      );
       return;
     }
 
