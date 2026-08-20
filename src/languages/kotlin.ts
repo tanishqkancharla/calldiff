@@ -1,7 +1,11 @@
 /**
  * Kotlin callable extraction (tree-sitter-kotlin).
  */
-import type { CallStep, FunctionInfo } from "../types.js";
+import {
+  branchWithCondition,
+  type CallStep,
+  type FunctionInfo,
+} from "../types.js";
 import {
   childByType,
   collapseWs,
@@ -132,24 +136,22 @@ function collectStatements(
     const kind = asElseIf ? "else-if" : "if";
     const labelKind = asElseIf ? "else if" : "if";
 
-    // See CONTRACT.md "Must support" #4.
-    if (cond) {
-      for (const step of collectStatements(file, [cond], className)) {
-        steps.push(step);
-      }
-    }
-
-    steps.push({
-      type: "branch",
-      key: condText ? `${kind}:${condText}` : kind,
-      label: condText ? `${labelKind} ${condText}` : labelKind,
-      ...locFromNode(file, cond ?? node),
-      children: collectStatements(
-        file,
-        statementsOf(bodies[0] ?? null),
-        className,
+    steps.push(
+      branchWithCondition(
+        {
+          type: "branch",
+          key: condText ? `${kind}:${condText}` : kind,
+          label: condText ? `${labelKind} ${condText}` : labelKind,
+          ...locFromNode(file, cond ?? node),
+          children: collectStatements(
+            file,
+            statementsOf(bodies[0] ?? null),
+            className,
+          ),
+        },
+        cond ? collectStatements(file, [cond], className) : [],
       ),
-    });
+    );
 
     if (!bodies[1]) return;
 
@@ -236,20 +238,16 @@ function collectStatements(
     }
 
     if (node.type === "when_expression") {
-      // The subject runs before any arm. See CONTRACT.md "Must support" #4.
       const subject = childByType(node, "when_subject");
-      if (subject) {
-        for (const step of collectStatements(file, [subject], className)) {
-          steps.push(step);
-        }
-      }
+      const subjectText = subject ? collapseWs(subject.text) : "";
+      const cases: CallStep[] = [];
       for (const entry of namedChildren(node)) {
         if (entry.type !== "when_entry") continue;
         const cond = childByType(entry, "when_condition");
         const body = childByType(entry, "control_structure_body");
         if (cond) {
           const text = collapseWs(cond.text);
-          steps.push({
+          cases.push({
             type: "branch",
             key: text ? `case:${text}` : "case",
             label: text ? `case ${text}` : "case",
@@ -257,7 +255,7 @@ function collectStatements(
             children: collectStatements(file, statementsOf(body), className),
           });
         } else {
-          steps.push({
+          cases.push({
             type: "branch",
             key: "else",
             label: "else",
@@ -266,6 +264,18 @@ function collectStatements(
           });
         }
       }
+      steps.push(
+        branchWithCondition(
+          {
+            type: "branch",
+            key: subjectText ? `when:${subjectText}` : "when",
+            label: subjectText ? `when ${subjectText}` : "when",
+            ...locFromNode(file, subject ?? node),
+            children: cases,
+          },
+          subject ? collectStatements(file, [subject], className) : [],
+        ),
+      );
       return;
     }
 

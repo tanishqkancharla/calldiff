@@ -2,7 +2,11 @@
  * Python callable extraction (tree-sitter-python) — parity with the TS extractor
  * where Python has an analogue.
  */
-import type { CallStep, FunctionInfo } from "../types.js";
+import {
+  branchWithCondition,
+  type CallStep,
+  type FunctionInfo,
+} from "../types.js";
 import {
   childByType,
   collapseWs,
@@ -119,12 +123,9 @@ function collectStatements(
     steps.push({ type: "call", key, ...locFromNode(file, node) });
   };
 
-  /** Branch tests are walked for calls too — see CONTRACT.md "Must support" #4. */
-  const addTestCalls = (test: SyntaxNode | null) => {
-    if (!test) return;
-    for (const step of collectStatements(file, [test], className)) {
-      steps.push(step);
-    }
+  const collectTestCalls = (test: SyntaxNode | null): CallStep[] => {
+    if (!test) return [];
+    return collectStatements(file, [test], className);
   };
 
   const walk = (node: SyntaxNode): void => {
@@ -147,28 +148,36 @@ function collectStatements(
             c.type !== "elif_clause",
         ) ?? null;
       const cond = condNode ? collapseWs(condNode.text) : "";
-      addTestCalls(condNode);
-      steps.push({
-        type: "branch",
-        key: cond ? `if:${cond}` : "if",
-        label: cond ? `if ${cond}` : "if",
-        ...locFromNode(file, condNode ?? node),
-        children: collectBlock(file, childByType(node, "block"), className),
-      });
+      steps.push(
+        branchWithCondition(
+          {
+            type: "branch",
+            key: cond ? `if:${cond}` : "if",
+            label: cond ? `if ${cond}` : "if",
+            ...locFromNode(file, condNode ?? node),
+            children: collectBlock(file, childByType(node, "block"), className),
+          },
+          collectTestCalls(condNode),
+        ),
+      );
 
       for (const clause of namedChildren(node)) {
         if (clause.type === "elif_clause") {
           const elifCond =
             namedChildren(clause).find((c) => c.type !== "block") ?? null;
           const text = elifCond ? collapseWs(elifCond.text) : "";
-          addTestCalls(elifCond);
-          steps.push({
-            type: "branch",
-            key: text ? `else-if:${text}` : "else-if",
-            label: text ? `elif ${text}` : "elif",
-            ...locFromNode(file, elifCond ?? clause),
-            children: collectBlock(file, childByType(clause, "block"), className),
-          });
+          steps.push(
+            branchWithCondition(
+              {
+                type: "branch",
+                key: text ? `else-if:${text}` : "else-if",
+                label: text ? `elif ${text}` : "elif",
+                ...locFromNode(file, elifCond ?? clause),
+                children: collectBlock(file, childByType(clause, "block"), className),
+              },
+              collectTestCalls(elifCond),
+            ),
+          );
         }
         if (clause.type === "else_clause") {
           steps.push({
@@ -187,9 +196,7 @@ function collectStatements(
       const subject =
         namedChildren(node).find((c) => c.type !== "block") ?? null;
       const subjectText = subject ? collapseWs(subject.text) : "";
-      // The subject runs before any arm — `match get_kind(x):` calls
-      // `get_kind`. See CONTRACT.md "Must support" #4.
-      addTestCalls(subject);
+      const cases: CallStep[] = [];
       const block = childByType(node, "block");
       for (const clause of block ? namedChildren(block) : []) {
         if (clause.type !== "case_clause") continue;
@@ -201,7 +208,7 @@ function collectStatements(
           : subjectText
             ? `case ${subjectText}`
             : "case";
-        steps.push({
+        cases.push({
           type: "branch",
           key: text ? `case:${text}` : "case",
           label,
@@ -209,6 +216,18 @@ function collectStatements(
           children: collectBlock(file, childByType(clause, "block"), className),
         });
       }
+      steps.push(
+        branchWithCondition(
+          {
+            type: "branch",
+            key: subjectText ? `match:${subjectText}` : "match",
+            label: subjectText ? `match ${subjectText}` : "match",
+            ...locFromNode(file, subject ?? node),
+            children: cases,
+          },
+          collectTestCalls(subject),
+        ),
+      );
       return;
     }
 

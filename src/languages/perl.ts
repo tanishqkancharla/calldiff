@@ -6,7 +6,11 @@
  * statement. `package Foo;` scopes until the next package statement,
  * `package Foo { }` only its block.
  */
-import type { CallStep, FunctionInfo } from "../types.js";
+import {
+  branchWithCondition,
+  type CallStep,
+  type FunctionInfo,
+} from "../types.js";
 import {
   childByType,
   collapseWs,
@@ -263,16 +267,20 @@ function branchStep(
   cond: SyntaxNode | null,
   anchor: SyntaxNode,
   children: CallStep[],
+  condition: CallStep[] = [],
 ) {
   const text = cond === null ? "" : collapseWs(cond.text);
 
-  return {
-    type: "branch",
-    key: text === "" ? key : `${key}:${text}`,
-    label: text === "" ? label : `${label} ${text}`,
-    ...locFromNode(scope.file, cond ?? anchor),
-    children,
-  } satisfies CallStep;
+  return branchWithCondition(
+    {
+      type: "branch",
+      key: text === "" ? key : `${key}:${text}`,
+      label: text === "" ? label : `${label} ${text}`,
+      ...locFromNode(scope.file, cond ?? anchor),
+      children,
+    },
+    condition,
+  );
 }
 
 function collectStatements(scope: Scope, statements: SyntaxNode[]) {
@@ -344,12 +352,13 @@ function collectConditional(scope: Scope, node: SyntaxNode) {
     cond,
     node,
     collectBlock(scope, childByType(node, "block")),
+    collectTestCalls(scope, cond),
   );
   const clauses = namedChildren(node).flatMap((clause) =>
     collectClause(scope, clause),
   );
 
-  return [...collectTestCalls(scope, cond), head, ...clauses];
+  return [head, ...clauses];
 }
 
 // elsif chains nest in the CST
@@ -363,12 +372,13 @@ function collectClause(scope: Scope, clause: SyntaxNode): CallStep[] {
       cond,
       clause,
       collectBlock(scope, childByType(clause, "block")),
+      collectTestCalls(scope, cond),
     );
     const nested = namedChildren(clause).flatMap((next) =>
       collectClause(scope, next),
     );
 
-    return [...collectTestCalls(scope, cond), head, ...nested];
+    return [head, ...nested];
   }
   if (clause.type === "else") {
     const body = collectBlock(scope, childByType(clause, "block"));
@@ -387,8 +397,15 @@ function collectPostfixConditional(scope: Scope, node: SyntaxNode) {
     expression === undefined ? [] : collectExpression(scope, expression);
 
   return [
-    ...collectTestCalls(scope, condition),
-    branchStep(scope, keyword, keyword, condition, node, children),
+    branchStep(
+      scope,
+      keyword,
+      keyword,
+      condition,
+      node,
+      children,
+      collectTestCalls(scope, condition),
+    ),
   ];
 }
 

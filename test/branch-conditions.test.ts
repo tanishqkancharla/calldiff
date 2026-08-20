@@ -3,11 +3,9 @@ import { expect, test } from "vitest";
 import { workspace } from "./workspace.js";
 
 /**
- * A call in a branch test is an edge, not just label text.
- *
- * `tree` used to render `if (guard(x))` into the branch label and drop the
- * call, so `reach` answered "No paths" for a path the same tool had just
- * printed. See CONTRACT.md "Must support" #4.
+ * A call in a branch test is the branch's identity, not a sibling and not
+ * only label text. ASCII prints the `if` line plus the arm; `reach` walks
+ * `condition` so `--to guard` hits that same `if` line.
  */
 const src = outdent({ trimTrailingNewline: false });
 
@@ -42,21 +40,37 @@ const forms = src`
   export function viaReturn(x: number): boolean {
     return guard(x);
   }
+  export function viaAndIf(x: number): number {
+    if (guard(x) && other(x)) { return target(); }
+    return 0;
+  }
+  export function other(x: number): boolean { return x < 0; }
 `;
 
 function formsHost() {
   return workspace({ "/src/app.ts": forms });
 }
 
-test("reach finds a call written in an if test", () => {
+test("reach --to guard prints the if line, not a sibling guard", () => {
   const result = formsHost().run("calldiff reach -e viaIf --to guard -- src");
 
   expect(result.code).toBe(0);
   expect(result.stdout).toContain(src`
     viaIf(x)
-    └─ guard(x)
+    └─ if (guard(x))
   `.trimEnd());
   expect(result.stdout).not.toContain("No paths");
+});
+
+test("reach --to target still goes through the if into the arm", () => {
+  const result = formsHost().run("calldiff reach -e viaIf --to target -- src");
+
+  expect(result.code).toBe(0);
+  expect(result.stdout).toContain(src`
+    viaIf(x)
+    └─ if (guard(x))
+       └─ target()
+  `.trimEnd());
 });
 
 test("reach finds a call written in an else-if test", () => {
@@ -65,7 +79,7 @@ test("reach finds a call written in an else-if test", () => {
   expect(result.code).toBe(0);
   expect(result.stdout).toContain(src`
     viaElseIf(x)
-    └─ guard(x)
+    └─ else if (guard(x))
   `.trimEnd());
   expect(result.stdout).not.toContain("No paths");
 });
@@ -86,17 +100,17 @@ test.each([
   expect(result.stdout).not.toContain("No paths");
 });
 
-test("the condition call is a sibling of the branch, as while already was", () => {
+test("tree keeps the if line; guard is not a sibling of the branch", () => {
   const host = formsHost();
 
   const viaIf = host.run("calldiff tree -e viaIf -- src");
   expect(viaIf.code).toBe(0);
   expect(viaIf.stdout).toContain(src`
     viaIf(x)
-    ├─ guard(x)
     └─ if (guard(x))
        └─ target()
   `.trimEnd());
+  expect(viaIf.stdout).not.toContain("├─ guard(x)");
 
   const viaWhile = host.run("calldiff tree -e viaWhile -- src");
   expect(viaWhile.code).toBe(0);
@@ -105,13 +119,6 @@ test("the condition call is a sibling of the branch, as while already was", () =
     ├─ guard(x)
     └─ target()
   `.trimEnd());
-});
-
-test("the branch label still shows the condition", () => {
-  const result = formsHost().run("calldiff tree -e viaIf -- src");
-
-  expect(result.code).toBe(0);
-  expect(result.stdout).toContain("if (guard(x))");
 });
 
 test("a test with no calls adds no steps", () => {
@@ -136,7 +143,29 @@ test("a test with no calls adds no steps", () => {
   expect(result.stdout).not.toContain("├─");
 });
 
-test("javascript switch subject is an edge; the arms stay branches", () => {
+test("multiple calls in one test share the same if line", () => {
+  const host = formsHost();
+
+  const tree = host.run("calldiff tree -e viaAndIf -- src");
+  expect(tree.code).toBe(0);
+  expect(tree.stdout).toContain(src`
+    viaAndIf(x)
+    └─ if (guard(x) && other(x))
+       └─ target()
+  `.trimEnd());
+
+  const toGuard = host.run("calldiff reach -e viaAndIf --to guard -- src");
+  expect(toGuard.code).toBe(0);
+  expect(toGuard.stdout).toContain("if (guard(x) && other(x))");
+  expect(toGuard.stdout).not.toContain("No paths");
+
+  const toOther = host.run("calldiff reach -e viaAndIf --to other -- src");
+  expect(toOther.code).toBe(0);
+  expect(toOther.stdout).toContain("if (guard(x) && other(x))");
+  expect(toOther.stdout).not.toContain("No paths");
+});
+
+test("javascript switch subject lives on the switch branch", () => {
   const host = workspace({
     "/src/app.js": src`
       export function getKind(x) { return "a"; }
@@ -154,17 +183,17 @@ test("javascript switch subject is an edge; the arms stay branches", () => {
   expect(tree.code).toBe(0);
   expect(tree.stdout).toContain(src`
     viaSwitch(x)
-    ├─ getKind(x)
-    ├─ case "a"
-       └─ target()
-    └─ default
+    └─ switch (getKind(x))
+       ├─ case "a"
+          └─ target()
+       └─ default
   `.trimEnd());
 
   const reach = host.run("calldiff reach -e viaSwitch --to getKind -- src");
   expect(reach.code).toBe(0);
   expect(reach.stdout).toContain(src`
     viaSwitch(x)
-    └─ getKind(x)
+    └─ switch (getKind(x))
   `.trimEnd());
   expect(reach.stdout).not.toContain("No paths");
 });
@@ -190,7 +219,7 @@ test("typescript switch subject is still an ordinary edge", () => {
   expect(result.stdout).not.toContain("No paths");
 });
 
-test("python match subject is an edge", () => {
+test("python match subject lives on the match branch", () => {
   const host = workspace({
     "/src/app.py": src`
       def get_kind(x):
@@ -211,14 +240,14 @@ test("python match subject is an edge", () => {
   expect(tree.code).toBe(0);
   expect(tree.stdout).toContain(src`
     via_match(x)
-    ├─ get_kind(x)
-    └─ case "a"
-       └─ target()
+    └─ match get_kind(x)
+       └─ case "a"
+          └─ target()
   `.trimEnd());
 
   const reach = host.run("calldiff reach -e via_match --to get_kind -- src");
   expect(reach.code).toBe(0);
-  expect(reach.stdout).toContain("get_kind(x)");
+  expect(reach.stdout).toContain("match get_kind(x)");
   expect(reach.stdout).not.toContain("No paths");
 });
 
@@ -247,20 +276,108 @@ test("python if and elif tests both resolve", () => {
   expect(tree.code).toBe(0);
   expect(tree.stdout).toContain(src`
     via_if(x)
-    ├─ guard(x)
     ├─ if guard(x)
        └─ target()
-    ├─ other(x)
     └─ elif other(x)
   `.trimEnd());
 
   const toGuard = host.run("calldiff reach -e via_if --to guard -- src");
   expect(toGuard.code).toBe(0);
-  expect(toGuard.stdout).toContain("guard(x)");
+  expect(toGuard.stdout).toContain("if guard(x)");
   expect(toGuard.stdout).not.toContain("No paths");
 
   const toOther = host.run("calldiff reach -e via_if --to other -- src");
   expect(toOther.code).toBe(0);
-  expect(toOther.stdout).toContain("other(x)");
+  expect(toOther.stdout).toContain("elif other(x)");
   expect(toOther.stdout).not.toContain("No paths");
+});
+
+test("rust match subject lives on the match branch", () => {
+  const host = workspace({
+    "/src/app.rs": src`
+      fn get_kind(x: i32) -> i32 { x }
+      fn target() -> i32 { 42 }
+      fn via_match(x: i32) -> i32 {
+          match get_kind(x) {
+              1 => target(),
+              _ => 0,
+          }
+      }
+    `,
+  });
+
+  const tree = host.run("calldiff tree -e via_match -- src");
+  expect(tree.code).toBe(0);
+  expect(tree.stdout).toContain(src`
+    via_match(x)
+    └─ match get_kind(x)
+       ├─ case 1
+          └─ target()
+       └─ case _
+  `.trimEnd());
+
+  const reach = host.run("calldiff reach -e via_match --to get_kind -- src");
+  expect(reach.code).toBe(0);
+  expect(reach.stdout).toContain("match get_kind(x)");
+  expect(reach.stdout).not.toContain("No paths");
+});
+
+test("go switch subject lives on the switch branch", () => {
+  const host = workspace({
+    "/src/app.go": src`
+      package app
+
+      func getKind(x int) int { return x }
+      func target() int { return 42 }
+      func viaSwitch(x int) int {
+        switch getKind(x) {
+        case 1:
+          return target()
+        default:
+          return 0
+        }
+      }
+    `,
+  });
+
+  const tree = host.run("calldiff tree -e viaSwitch -- src");
+  expect(tree.code).toBe(0);
+  expect(tree.stdout).toContain(src`
+    viaSwitch(x)
+    └─ switch getKind(x)
+       ├─ case 1
+          └─ target()
+       └─ default
+  `.trimEnd());
+
+  const reach = host.run("calldiff reach -e viaSwitch --to getKind -- src");
+  expect(reach.code).toBe(0);
+  expect(reach.stdout).toContain("switch getKind(x)");
+  expect(reach.stdout).not.toContain("No paths");
+});
+
+test("kotlin when subject lives on the when branch", () => {
+  const host = workspace({
+    "/src/app.kt": src`
+      fun getKind(x: Int): Int = x
+      fun target(): Int = 42
+      fun viaWhen(x: Int): Int {
+        return when (getKind(x)) {
+          1 -> target()
+          else -> 0
+        }
+      }
+    `,
+  });
+
+  const tree = host.run("calldiff tree -e viaWhen -- src");
+  expect(tree.code).toBe(0);
+  expect(tree.stdout).toContain("when");
+  expect(tree.stdout).toContain("getKind(x)");
+  expect(tree.stdout).not.toContain("├─ getKind(x)");
+
+  const reach = host.run("calldiff reach -e viaWhen --to getKind -- src");
+  expect(reach.code).toBe(0);
+  expect(reach.stdout).toContain("when");
+  expect(reach.stdout).not.toContain("No paths");
 });

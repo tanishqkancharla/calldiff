@@ -2,7 +2,11 @@
  * OCaml callable extraction (tree-sitter-ocaml).
  * Package exports: `ocaml`, `ocaml_interface`, `ocaml_type` — we use `.ocaml`.
  */
-import type { CallStep, FunctionInfo } from "../types.js";
+import {
+  branchWithCondition,
+  type CallStep,
+  type FunctionInfo,
+} from "../types.js";
 import {
   childByType,
   collapseWs,
@@ -143,16 +147,7 @@ function collectExpr(
           children: tryBody ? collectExpr(file, tryBody, moduleName) : [],
         });
       }
-      if (n.type === "match_expression") {
-        // The scrutinee runs before any arm. See CONTRACT.md "Must support" #4.
-        const subject =
-          namedChildren(n).find((c) => c.type !== "match_case") ?? null;
-        if (subject) {
-          for (const step of collectExpr(file, subject, moduleName)) {
-            steps.push(step);
-          }
-        }
-      }
+      const matchCases: CallStep[] = [];
       for (const clause of namedChildren(n)) {
         if (clause.type !== "match_case") continue;
         const kids = namedChildren(clause);
@@ -160,13 +155,35 @@ function collectExpr(
         const pattern = kids.length > 1 ? kids[0] : null;
         const text = pattern ? collapseWs(pattern.text) : "";
         const labelKind = n.type === "try_expression" ? "with" : "case";
-        steps.push({
+        const arm: CallStep = {
           type: "branch",
           key: text ? `${labelKind}:${text}` : labelKind,
           label: text ? `${labelKind} ${text}` : labelKind,
           ...locFromNode(file, pattern ?? clause),
           children: body ? collectExpr(file, body, moduleName) : [],
-        });
+        };
+        if (n.type === "try_expression") {
+          steps.push(arm);
+        } else {
+          matchCases.push(arm);
+        }
+      }
+      if (n.type === "match_expression") {
+        const subject =
+          namedChildren(n).find((c) => c.type !== "match_case") ?? null;
+        const subjectText = subject ? collapseWs(subject.text) : "";
+        steps.push(
+          branchWithCondition(
+            {
+              type: "branch",
+              key: subjectText ? `match:${subjectText}` : "match",
+              label: subjectText ? `match ${subjectText}` : "match",
+              ...locFromNode(file, subject ?? n),
+              children: matchCases,
+            },
+            subject ? collectExpr(file, subject, moduleName) : [],
+          ),
+        );
       }
       return;
     }
@@ -180,24 +197,24 @@ function collectExpr(
           (c) => c.type !== "then_clause" && c.type !== "else_clause",
         ) ?? null;
       const condText = cond ? collapseWs(cond.text) : "";
-      // See CONTRACT.md "Must support" #4. The nested `else if` chain below
-      // re-collects through collectExpr, so its test calls come back with it.
-      if (cond) {
-        for (const step of collectExpr(file, cond, moduleName)) steps.push(step);
-      }
-      steps.push({
-        type: "branch",
-        key: condText ? `if:${condText}` : "if",
-        label: condText ? `if ${condText}` : "if",
-        ...locFromNode(file, cond ?? n),
-        children: thenClause
-          ? collectExpr(
-              file,
-              thenClause.namedChild(0) ?? thenClause,
-              moduleName,
-            )
-          : [],
-      });
+      steps.push(
+        branchWithCondition(
+          {
+            type: "branch",
+            key: condText ? `if:${condText}` : "if",
+            label: condText ? `if ${condText}` : "if",
+            ...locFromNode(file, cond ?? n),
+            children: thenClause
+              ? collectExpr(
+                  file,
+                  thenClause.namedChild(0) ?? thenClause,
+                  moduleName,
+                )
+              : [],
+          },
+          cond ? collectExpr(file, cond, moduleName) : [],
+        ),
+      );
       if (elseClause) {
         const elseBody = elseClause.namedChild(0) ?? elseClause;
         if (elseBody.type === "if_expression") {
@@ -223,7 +240,6 @@ function collectExpr(
           });
         }
       }
-      if (cond) walk(cond);
       return;
     }
 

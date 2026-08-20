@@ -1,7 +1,11 @@
 /**
  * Haskell callable extraction (tree-sitter-haskell).
  */
-import type { CallStep, FunctionInfo } from "../types.js";
+import {
+  branchWithCondition,
+  type CallStep,
+  type FunctionInfo,
+} from "../types.js";
 import {
   childByType,
   collapseWs,
@@ -115,17 +119,18 @@ function collectExpr(
       const thenE = kids[1] ?? null;
       const elseE = kids[2] ?? null;
       const condText = cond ? collapseWs(cond.text) : "";
-      // See CONTRACT.md "Must support" #4.
-      if (cond) {
-        for (const step of collectExpr(file, cond, false)) steps.push(step);
-      }
-      steps.push({
-        type: "branch",
-        key: condText ? `if:${condText}` : "if",
-        label: condText ? `if ${condText}` : "if",
-        ...locFromNode(file, cond ?? n),
-        children: thenE ? collectExpr(file, thenE) : [],
-      });
+      steps.push(
+        branchWithCondition(
+          {
+            type: "branch",
+            key: condText ? `if:${condText}` : "if",
+            label: condText ? `if ${condText}` : "if",
+            ...locFromNode(file, cond ?? n),
+            children: thenE ? collectExpr(file, thenE) : [],
+          },
+          cond ? collectExpr(file, cond, false) : [],
+        ),
+      );
       if (elseE) {
         steps.push({
           type: "branch",

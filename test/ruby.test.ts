@@ -299,10 +299,11 @@ test("ruby: begin/rescue/ensure and case/when as branches", () => {
          └─ recover()
       ├─ ensure
          └─ close()
-      ├─ when 1
-         └─ do_a()
-      ├─ else
-         └─ do_other()
+      ├─ case x
+         ├─ when 1
+            └─ do_a()
+         └─ else
+            └─ do_other()
     + └─ flush()
   `));
 });

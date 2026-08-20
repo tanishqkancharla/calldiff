@@ -4,7 +4,11 @@
  * Quirks: paren-less calls are often bare `identifier` nodes (not `call`).
  * `Foo.new` is a `call` with constant + identifier "new".
  */
-import type { CallStep, FunctionInfo } from "../types.js";
+import {
+  branchWithCondition,
+  type CallStep,
+  type FunctionInfo,
+} from "../types.js";
 import {
   childByType,
   collapseWs,
@@ -131,12 +135,9 @@ function collectStatements(
     steps.push({ type: "call", key, ...locFromNode(file, node) });
   };
 
-  /** Branch tests are walked for calls too — see CONTRACT.md "Must support" #4. */
-  const addTestCalls = (test: SyntaxNode | null) => {
-    if (!test) return;
-    for (const step of collectStatements(file, [test], className)) {
-      steps.push(step);
-    }
+  const collectTestCalls = (test: SyntaxNode | null): CallStep[] => {
+    if (!test) return [];
+    return collectStatements(file, [test], className);
   };
 
   const walk = (node: SyntaxNode, asStatement: boolean): void => {
@@ -165,14 +166,18 @@ function collectStatements(
       const condText = cond ? collapseWs(cond.text) : "";
       const kind = node.type; // if | unless
 
-      addTestCalls(cond);
-      steps.push({
-        type: "branch",
-        key: condText ? `${kind}:${condText}` : kind,
-        label: condText ? `${kind} ${condText}` : kind,
-        ...locFromNode(file, cond ?? node),
-        children: collectBody(file, thenNode, className),
-      });
+      steps.push(
+        branchWithCondition(
+          {
+            type: "branch",
+            key: condText ? `${kind}:${condText}` : kind,
+            label: condText ? `${kind} ${condText}` : kind,
+            ...locFromNode(file, cond ?? node),
+            children: collectBody(file, thenNode, className),
+          },
+          collectTestCalls(cond),
+        ),
+      );
 
       for (const clause of kids) {
         if (clause.type === "elsif") {
@@ -181,14 +186,18 @@ function collectStatements(
             elsifKids.find((c) => c.type !== "then" && c.type !== "else") ??
             null;
           const text = elsifCond ? collapseWs(elsifCond.text) : "";
-          addTestCalls(elsifCond);
-          steps.push({
-            type: "branch",
-            key: text ? `else-if:${text}` : "else-if",
-            label: text ? `elsif ${text}` : "elsif",
-            ...locFromNode(file, elsifCond ?? clause),
-            children: collectBody(file, childByType(clause, "then"), className),
-          });
+          steps.push(
+            branchWithCondition(
+              {
+                type: "branch",
+                key: text ? `else-if:${text}` : "else-if",
+                label: text ? `elsif ${text}` : "elsif",
+                ...locFromNode(file, elsifCond ?? clause),
+                children: collectBody(file, childByType(clause, "then"), className),
+              },
+              collectTestCalls(elsifCond),
+            ),
+          );
           // nested else under elsif
           const nestedElse = childByType(clause, "else");
           if (nestedElse) {
@@ -273,6 +282,11 @@ function collectStatements(
     }
 
     if (node.type === "case") {
+      const subject =
+        namedChildren(node).find((c) => c.type !== "when" && c.type !== "else") ??
+        null;
+      const subjectText = subject ? collapseWs(subject.text) : "";
+      const cases: CallStep[] = [];
       for (const clause of namedChildren(node)) {
         if (clause.type === "when") {
           const pattern =
@@ -280,7 +294,7 @@ function collectStatements(
             namedChildren(clause).find((c) => c.type !== "then") ??
             null;
           const text = pattern ? collapseWs(pattern.text) : "";
-          steps.push({
+          cases.push({
             type: "branch",
             key: text ? `when:${text}` : "when",
             label: text ? `when ${text}` : "when",
@@ -289,7 +303,7 @@ function collectStatements(
           });
         }
         if (clause.type === "else") {
-          steps.push({
+          cases.push({
             type: "branch",
             key: "else",
             label: "else",
@@ -298,6 +312,18 @@ function collectStatements(
           });
         }
       }
+      steps.push(
+        branchWithCondition(
+          {
+            type: "branch",
+            key: subjectText ? `case:${subjectText}` : "case",
+            label: subjectText ? `case ${subjectText}` : "case",
+            ...locFromNode(file, subject ?? node),
+            children: cases,
+          },
+          collectTestCalls(subject),
+        ),
+      );
       return;
     }
 

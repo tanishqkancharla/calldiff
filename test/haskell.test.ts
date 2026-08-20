@@ -58,8 +58,6 @@ test("haskell: refactors calls into a helper with if/else", () => {
     + ├─ getServices()
     + │  ├─ authStorageCreate()
     + │  └─ createCodingTools()
-      ├─ null()
-      ├─ sessionId(_)
       ├─ if null (sessionId options)
          └─ sessionManagerCreate()
       └─ else

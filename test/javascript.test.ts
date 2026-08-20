@@ -310,10 +310,11 @@ test("javascript: try/catch/finally and switch as branches", () => {
          └─ recover()
       ├─ finally
          └─ close()
-      ├─ case 1
-         └─ doA()
-      ├─ default
-         └─ doOther()
+      ├─ switch (x)
+         ├─ case 1
+            └─ doA()
+         └─ default
+            └─ doOther()
     + └─ flush()
   `));
 });

@@ -1,7 +1,11 @@
 /**
  * TypeScript / TSX callable extraction (tree-sitter-typescript).
  */
-import type { CallStep, FunctionInfo } from "../types.js";
+import {
+  branchWithCondition,
+  type CallStep,
+  type FunctionInfo,
+} from "../types.js";
 import {
   childByType,
   collapseWs,
@@ -155,18 +159,10 @@ function collectStatements(
     steps.push({ type: "call", key, ...locFromNode(file, node) });
   };
 
-  /**
-   * A branch test is consumed as the branch label; walk it for calls as well,
-   * or `tree` prints `if (guard(x))` while `reach` finds no path to `guard`.
-   * Emitted before the branch because the test runs before the arm — the shape
-   * `while (guard(x))` already has, loops taking the ordinary path.
-   * See CONTRACT.md "Must support" #4.
-   */
-  const addTestCalls = (test: SyntaxNode | null) => {
-    if (!test) return;
-    for (const step of collectStatements(file, [test], className)) {
-      steps.push(step);
-    }
+  /** Calls in a branch test — stored on `condition`, not as siblings. */
+  const collectTestCalls = (test: SyntaxNode | null): CallStep[] => {
+    if (!test) return [];
+    return collectStatements(file, [test], className);
   };
 
   const emitCall = (
@@ -209,16 +205,20 @@ function collectStatements(
       const elseClause = childByType(node, "else_clause");
       const cond = test ? condText(test) : "";
 
-      addTestCalls(test);
-      steps.push({
-        type: "branch",
-        key: branchKey("if", cond),
-        label: test ? `if (${condText(test)})` : "if",
-        ...locFromNode(file, test ?? node),
-        children: consequent
-          ? collectStatements(file, statementsOf(consequent), className)
-          : [],
-      });
+      steps.push(
+        branchWithCondition(
+          {
+            type: "branch",
+            key: branchKey("if", cond),
+            label: test ? `if (${condText(test)})` : "if",
+            ...locFromNode(file, test ?? node),
+            children: consequent
+              ? collectStatements(file, statementsOf(consequent), className)
+              : [],
+          },
+          collectTestCalls(test),
+        ),
+      );
 
       let current = elseClause;
       while (current) {
@@ -236,16 +236,20 @@ function collectStatements(
                 c.type !== "else_clause",
             ) ?? null;
           const elseCond = elseTest ? condText(elseTest) : "";
-          addTestCalls(elseTest);
-          steps.push({
-            type: "branch",
-            key: branchKey("else-if", elseCond),
-            label: elseTest ? `else if (${condText(elseTest)})` : "else if",
-            ...locFromNode(file, elseTest ?? current),
-            children: elseConsequent
-              ? collectStatements(file, statementsOf(elseConsequent), className)
-              : [],
-          });
+          steps.push(
+            branchWithCondition(
+              {
+                type: "branch",
+                key: branchKey("else-if", elseCond),
+                label: elseTest ? `else if (${condText(elseTest)})` : "else if",
+                ...locFromNode(file, elseTest ?? current),
+                children: elseConsequent
+                  ? collectStatements(file, statementsOf(elseConsequent), className)
+                  : [],
+              },
+              collectTestCalls(elseTest),
+            ),
+          );
           current = childByType(inner, "else_clause");
           continue;
         }

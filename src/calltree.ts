@@ -148,7 +148,7 @@ function expandSteps(
 ): CallNode[] {
   return steps.map((step) => {
     if (step.type === "branch") {
-      return {
+      const node: CallNode = {
         key: step.key,
         label: step.label,
         kind: "branch" as const,
@@ -162,6 +162,17 @@ function expandSteps(
           owner,
         ),
       };
+      if (step.condition?.length) {
+        node.condition = expandSteps(
+          step.condition,
+          index,
+          depth,
+          maxDepth,
+          visiting,
+          owner,
+        );
+      }
+      return node;
     }
     return expandCall(
       step.key,

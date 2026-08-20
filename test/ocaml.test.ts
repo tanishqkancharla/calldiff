@@ -251,10 +251,11 @@ test("ocaml: match and try/with as branches; skips nested funs", () => {
   expect(result.code).toBe(0);
   expect(result.stdout).toContain(diffOutdent(`
       boot(x)
-      ├─ case 1
-         └─ do_a()
-      ├─ case _
-         └─ do_other()
+      ├─ match x
+         ├─ case 1
+            └─ do_a()
+         └─ case _
+            └─ do_other()
       ├─ try
          └─ open_()
       ├─ with _

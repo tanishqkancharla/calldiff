@@ -58,6 +58,28 @@ export function collectPathsTo(
       paths.push(pathToTree(chain));
       return;
     }
+    if (node.condition) {
+      for (const cond of node.condition) {
+        walkCondition(cond, chain);
+      }
+    }
+    for (const child of node.children) {
+      walk(child, chain);
+    }
+  };
+
+  /** Test/subject calls: a hit on the call itself is the branch line, not a sibling. */
+  const walkCondition = (node: CallNode, branchChain: CallNode[]) => {
+    if (nodeMatchesTarget(node.key, resolvedTarget, rawTarget)) {
+      paths.push(pathToTree(branchChain));
+      return;
+    }
+    const chain = [...branchChain, node];
+    if (node.condition) {
+      for (const cond of node.condition) {
+        walkCondition(cond, chain);
+      }
+    }
     for (const child of node.children) {
       walk(child, chain);
     }

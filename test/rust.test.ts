@@ -62,7 +62,6 @@ test("rust: refactors calls into a helper with if/else", () => {
     + │  ├─ auth_storage_create()
     + │  └─ create_coding_tools()
     + ├─ services.boot()
-      ├─ is_empty()
       ├─ if options.session_id.is_empty()
          └─ session_manager_create()
       └─ else
@@ -293,10 +292,11 @@ test("rust: match arms as branches", () => {
   expect(result.code).toBe(0);
   expect(result.stdout).toContain(diffOutdent(`
       boot(x)
-      ├─ case 1
-         └─ do_a()
-      ├─ case _
-         └─ do_other()
+      ├─ match x
+         ├─ case 1
+            └─ do_a()
+         └─ case _
+            └─ do_other()
     + └─ flush()
   `));
 });

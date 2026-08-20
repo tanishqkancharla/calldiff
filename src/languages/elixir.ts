@@ -1,7 +1,11 @@
 /**
  * Elixir callable extraction (tree-sitter-elixir).
  */
-import type { CallStep, FunctionInfo } from "../types.js";
+import {
+  branchWithCondition,
+  type CallStep,
+  type FunctionInfo,
+} from "../types.js";
 import {
   childByType,
   collapseWs,
@@ -158,16 +162,18 @@ function collectStatements(
           ? namedChildren(doBlock).filter((c) => c.type !== "else_block")
           : [];
         const elseBlock = doBlock ? childByType(doBlock, "else_block") : null;
-        // The condition runs before either arm, so its calls are emitted first.
-        // See CONTRACT.md "Must support" #4.
-        if (cond) walk(cond);
-        steps.push({
-          type: "branch",
-          key: condText ? `if:${condText}` : "if",
-          label: condText ? `if ${condText}` : "if",
-          ...locFromNode(file, cond ?? node),
-          children: collectStatements(file, thenKids, moduleName),
-        });
+        steps.push(
+          branchWithCondition(
+            {
+              type: "branch",
+              key: condText ? `if:${condText}` : "if",
+              label: condText ? `if ${condText}` : "if",
+              ...locFromNode(file, cond ?? node),
+              children: collectStatements(file, thenKids, moduleName),
+            },
+            cond ? collectStatements(file, [cond], moduleName) : [],
+          ),
+        );
         if (elseBlock) {
           steps.push({
             type: "branch",

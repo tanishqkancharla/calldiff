@@ -200,6 +200,9 @@ function serializeCallNode(node: CallNode): CallNode {
   };
   assignOptionalTreeFields(serialized, node);
   assignOptionalResolutionFields(serialized, node);
+  if (node.condition?.length) {
+    serialized.condition = node.condition.map(serializeCallNode);
+  }
   return serialized;
 }
 

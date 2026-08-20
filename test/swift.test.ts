@@ -317,10 +317,11 @@ test("swift: do/catch and switch as branches", () => {
          └─ openIt()
       ├─ catch
          └─ recover()
-      ├─ case 1
-         └─ doA()
-      ├─ default
-         └─ doOther()
+      ├─ switch x
+         ├─ case 1
+            └─ doA()
+         └─ default
+            └─ doOther()
     + └─ flush()
   `));
 });

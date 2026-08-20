@@ -1,7 +1,11 @@
 /**
  * JavaScript / JSX callable extraction (tree-sitter-javascript).
  */
-import type { CallStep, FunctionInfo } from "../types.js";
+import {
+  branchWithCondition,
+  type CallStep,
+  type FunctionInfo,
+} from "../types.js";
 import {
   childByType,
   collapseWs,
@@ -159,12 +163,10 @@ function collectStatements(
     steps.push({ type: "call", key, ...locFromNode(file, node) });
   };
 
-  /** Branch tests are walked for calls too — see CONTRACT.md "Must support" #4. */
-  const addTestCalls = (test: SyntaxNode | null) => {
-    if (!test) return;
-    for (const step of collectStatements(file, [test], className)) {
-      steps.push(step);
-    }
+  /** Calls in a branch test — stored on `condition`, not as siblings. */
+  const collectTestCalls = (test: SyntaxNode | null): CallStep[] => {
+    if (!test) return [];
+    return collectStatements(file, [test], className);
   };
 
   const emitCall = (
@@ -207,16 +209,20 @@ function collectStatements(
       const elseClause = childByType(node, "else_clause");
       const cond = test ? condText(test) : "";
 
-      addTestCalls(test);
-      steps.push({
-        type: "branch",
-        key: branchKey("if", cond),
-        label: test ? `if (${condText(test)})` : "if",
-        ...locFromNode(file, test ?? node),
-        children: consequent
-          ? collectStatements(file, statementsOf(consequent), className)
-          : [],
-      });
+      steps.push(
+        branchWithCondition(
+          {
+            type: "branch",
+            key: branchKey("if", cond),
+            label: test ? `if (${condText(test)})` : "if",
+            ...locFromNode(file, test ?? node),
+            children: consequent
+              ? collectStatements(file, statementsOf(consequent), className)
+              : [],
+          },
+          collectTestCalls(test),
+        ),
+      );
 
       let current = elseClause;
       while (current) {
@@ -234,16 +240,20 @@ function collectStatements(
                 c.type !== "else_clause",
             ) ?? null;
           const elseCond = elseTest ? condText(elseTest) : "";
-          addTestCalls(elseTest);
-          steps.push({
-            type: "branch",
-            key: branchKey("else-if", elseCond),
-            label: elseTest ? `else if (${condText(elseTest)})` : "else if",
-            ...locFromNode(file, elseTest ?? current),
-            children: elseConsequent
-              ? collectStatements(file, statementsOf(elseConsequent), className)
-              : [],
-          });
+          steps.push(
+            branchWithCondition(
+              {
+                type: "branch",
+                key: branchKey("else-if", elseCond),
+                label: elseTest ? `else if (${condText(elseTest)})` : "else if",
+                ...locFromNode(file, elseTest ?? current),
+                children: elseConsequent
+                  ? collectStatements(file, statementsOf(elseConsequent), className)
+                  : [],
+              },
+              collectTestCalls(elseTest),
+            ),
+          );
           current = childByType(inner, "else_clause");
           continue;
         }
@@ -306,9 +316,8 @@ function collectStatements(
     }
 
     if (type === "switch_statement") {
-      // The subject runs before any arm — `switch (getKind(x))` calls
-      // `getKind`. See CONTRACT.md "Must support" #4.
-      addTestCalls(childByType(node, "parenthesized_expression"));
+      const subject = childByType(node, "parenthesized_expression");
+      const cases: CallStep[] = [];
       const body = childByType(node, "switch_body");
       for (const clause of body ? namedChildren(body) : []) {
         if (clause.type === "switch_case") {
@@ -321,7 +330,6 @@ function collectStatements(
                 c.type !== "return_statement" &&
                 c.type !== "throw_statement",
             ) ?? null;
-          // Prefer the first non-statement child as the case value
           const kids = namedChildren(clause);
           const caseValue =
             kids.find(
@@ -347,7 +355,7 @@ function collectStatements(
               c.type === "lexical_declaration" ||
               c.type === "variable_declaration",
           );
-          steps.push({
+          cases.push({
             type: "branch",
             key: text ? `case:${text}` : "case",
             label: text ? `case ${text}` : "case",
@@ -359,7 +367,7 @@ function collectStatements(
           const stmts = namedChildren(clause).filter(
             (c) => c.type !== "break_statement",
           );
-          steps.push({
+          cases.push({
             type: "branch",
             key: "default",
             label: "default",
@@ -368,6 +376,19 @@ function collectStatements(
           });
         }
       }
+      const subjectText = subject ? condText(subject) : "";
+      steps.push(
+        branchWithCondition(
+          {
+            type: "branch",
+            key: subjectText ? `switch:${subjectText}` : "switch",
+            label: subjectText ? `switch (${subjectText})` : "switch",
+            ...locFromNode(file, subject ?? node),
+            children: cases,
+          },
+          collectTestCalls(subject),
+        ),
+      );
       return;
     }
 

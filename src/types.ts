@@ -39,6 +39,14 @@ export interface CallNode {
   truncated?: true;
   /** Re-entry into a definition already on the stack (rendered as a `⇄` suffix). */
   recursive?: true;
+  /**
+   * Expanded calls from a branch test / switch subject.
+   *
+   * Not rendered in ASCII (`label` already shows the condition). `reach` walks
+   * these so `--to guard` finds `if (guard(x))` without a sibling `guard(x)`
+   * next to the branch. Arm calls stay in `children`.
+   */
+  condition?: CallNode[];
   children: CallNode[];
 }
 
@@ -62,8 +70,24 @@ export type CallStep =
       file?: string;
       line?: number;
       endLine?: number;
+      /**
+       * Calls in the test / subject. Not ASCII children; `reach` walks these.
+       * Empty / omitted when the test has no calls (`if (x > 0)`).
+       */
+      condition?: CallStep[];
       children: CallStep[];
     };
+
+export type BranchStep = Extract<CallStep, { type: "branch" }>;
+
+/** Attach test/subject calls to a branch without emitting them as siblings. */
+export function branchWithCondition(
+  branch: BranchStep,
+  condition: CallStep[],
+): BranchStep {
+  if (condition.length === 0) return branch;
+  return { ...branch, condition };
+}
 
 export type DiffStatus = "same" | "added" | "removed";
 
@@ -153,6 +177,7 @@ export function assignOptionalResolutionFields(
   if (source.declaredIn) target.declaredIn = source.declaredIn;
   if (source.truncated) target.truncated = source.truncated;
   if (source.recursive) target.recursive = source.recursive;
+  if (source.condition?.length) target.condition = source.condition;
   return target;
 }
 
