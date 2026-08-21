@@ -29,7 +29,11 @@ function getParamsLabel(params: SyntaxNode | null): string {
   return names.length === 0 ? "()" : `(${names.join(", ")})`;
 }
 
-function calleeKey(node: SyntaxNode, receiverType: string | null): string | null {
+function calleeKey(
+  node: SyntaxNode,
+  receiverType: string | null,
+  receiverName: string | null,
+): string | null {
   if (node.type === "identifier") {
     // NewThing() → new Thing (constructor alias)
     if (node.text.startsWith("New") && node.text.length > 3) {
@@ -45,17 +49,12 @@ function calleeKey(node: SyntaxNode, receiverType: string | null): string | null
     const prop = field.text;
     if (object.type === "identifier") {
       const objName = object.text;
-      if (
-        receiverType &&
-        objName[0] &&
-        objName[0] === objName[0].toLowerCase()
-      ) {
+      if (receiverType && receiverName && objName === receiverName) {
         return `${receiverType}.${prop}`;
       }
       return `${objName}.${prop}`;
     }
-    if (receiverType) return `${receiverType}.${prop}`;
-    return prop;
+    return `${collapseWs(object.text)}.${prop}`;
   }
   return null;
 }
@@ -73,6 +72,7 @@ function collectIf(
   file: string,
   node: SyntaxNode,
   receiverType: string | null,
+  receiverName: string | null,
   steps: CallStep[],
   asElseIf = false,
 ): void {
@@ -95,20 +95,30 @@ function collectIf(
     label: condText ? `${labelKind} ${condText}` : labelKind,
     ...locFromNode(file, condNode ?? node),
     children: consequent
-      ? collectStatements(file, statementsOf(consequent), receiverType)
+      ? collectStatements(
+          file,
+          statementsOf(consequent),
+          receiverType,
+          receiverName,
+        )
       : [],
   });
 
   if (!alt) return;
   if (alt.type === "if_statement") {
-    collectIf(file, alt, receiverType, steps, true);
+    collectIf(file, alt, receiverType, receiverName, steps, true);
   } else {
     steps.push({
       type: "branch",
       key: "else",
       label: "else",
       ...locFromNode(file, alt),
-      children: collectStatements(file, statementsOf(alt), receiverType),
+      children: collectStatements(
+        file,
+        statementsOf(alt),
+        receiverType,
+        receiverName,
+      ),
     });
   }
 }
@@ -117,15 +127,16 @@ function collectStatements(
   file: string,
   statements: SyntaxNode[],
   receiverType: string | null,
+  receiverName: string | null,
 ): CallStep[] {
   const steps: CallStep[] = [];
   const seen = new Set<string>();
 
-  const addCall = (key: string, node: SyntaxNode) => {
+  const addCall = (key: string, node: SyntaxNode, children?: CallStep[]) => {
     const mark = `${key}:${node.startIndex}`;
     if (seen.has(mark)) return;
     seen.add(mark);
-    steps.push({ type: "call", key, ...locFromNode(file, node) });
+    steps.push({ type: "call", key, ...locFromNode(file, node), children });
   };
 
   const walk = (node: SyntaxNode): void => {
@@ -138,7 +149,7 @@ function collectStatements(
     }
 
     if (node.type === "if_statement") {
-      collectIf(file, node, receiverType, steps, false);
+      collectIf(file, node, receiverType, receiverName, steps, false);
       return;
     }
 
@@ -148,7 +159,12 @@ function collectStatements(
         key: "defer",
         label: "defer",
         ...locFromNode(file, node),
-        children: collectStatements(file, namedChildren(node), receiverType),
+        children: collectStatements(
+          file,
+          namedChildren(node),
+          receiverType,
+          receiverName,
+        ),
       });
       return;
     }
@@ -185,7 +201,12 @@ function collectStatements(
                 : "case",
             ...locFromNode(file, expr ?? clause),
             children: list
-              ? collectStatements(file, namedChildren(list), receiverType)
+              ? collectStatements(
+                  file,
+                  namedChildren(list),
+                  receiverType,
+                  receiverName,
+                )
               : [],
           });
         }
@@ -197,7 +218,12 @@ function collectStatements(
             label: "default",
             ...locFromNode(file, clause),
             children: list
-              ? collectStatements(file, namedChildren(list), receiverType)
+              ? collectStatements(
+                  file,
+                  namedChildren(list),
+                  receiverType,
+                  receiverName,
+                )
               : [],
           });
         }
@@ -207,9 +233,24 @@ function collectStatements(
 
     if (node.type === "call_expression") {
       const callee = node.namedChild(0);
+      const args = childByType(node, "argument_list");
+      const inlineChildren = args
+        ? namedChildren(args).flatMap((arg) => {
+            if (arg.type !== "func_literal") return [];
+            const body = childByType(arg, "block");
+            return body
+              ? collectStatements(
+                  file,
+                  statementsOf(body),
+                  receiverType,
+                  receiverName,
+                )
+              : [];
+          })
+        : [];
       if (callee && callee.type !== "func_literal") {
-        const key = calleeKey(callee, receiverType);
-        if (key) addCall(key, node);
+        const key = calleeKey(callee, receiverType, receiverName);
+        if (key) addCall(key, node, inlineChildren);
       }
       // Do not walk into func_literal callees/bodies
       for (const child of namedChildren(node)) {
@@ -239,6 +280,13 @@ function receiverTypeName(method: SyntaxNode): string | null {
   return typeId?.text ?? null;
 }
 
+function receiverVariableName(method: SyntaxNode): string | null {
+  const recv = method.namedChild(0);
+  if (!recv || recv.type !== "parameter_list") return null;
+  const decl = childByType(recv, "parameter_declaration");
+  return decl ? childByType(decl, "identifier")?.text ?? null : null;
+}
+
 function handleFunction(
   file: string,
   node: SyntaxNode,
@@ -253,7 +301,7 @@ function handleFunction(
     key: name,
     label: `${name}${getParamsLabel(params)}`,
     file,
-    steps: body ? collectStatements(file, statementsOf(body), null) : [],
+    steps: body ? collectStatements(file, statementsOf(body), null, null) : [],
     exported: isExported(name),
     start: node.startIndex,
     end: node.endIndex,
@@ -279,6 +327,7 @@ function handleMethod(
   functions: FunctionInfo[],
 ) {
   const typeName = receiverTypeName(node);
+  const receiverName = receiverVariableName(node);
   const name = childByType(node, "field_identifier")?.text ?? null;
   if (!typeName || !name) return;
 
@@ -293,7 +342,9 @@ function handleMethod(
     key,
     label: `${key}${getParamsLabel(params)}`,
     file,
-    steps: body ? collectStatements(file, statementsOf(body), typeName) : [],
+    steps: body
+      ? collectStatements(file, statementsOf(body), typeName, receiverName)
+      : [],
     exported: isExported(name),
     start: node.startIndex,
     end: node.endIndex,
