@@ -386,3 +386,65 @@ test("rust: Type::method scoped calls and ignores bare field reads", () => {
     + └─ obj.other()
   `));
 });
+
+test("rust: recursively extracts functions from inline modules", () => {
+  const host = workspace();
+  const from = host.commit("before", {
+    "/inline.rs": src`
+       #[cfg(test)]
+       mod tests {
+           #[test]
+           fn creates_a_session() {
+               arrange();
+               create_session();
+           }
+
+           mod nested {
+               #[test]
+               fn rejects_a_session() {
+                   arrange();
+                   reject_session();
+               }
+           }
+       }
+    `,
+  });
+  const to = host.commit("after", {
+    "/inline.rs": src`
+       #[cfg(test)]
+       mod tests {
+           #[test]
+           fn creates_a_session() {
+               arrange();
+               create_session();
+               assert_session();
+           }
+
+           mod nested {
+               #[test]
+               fn rejects_a_session() {
+                   arrange();
+                   reject_session();
+                   assert_rejection();
+               }
+           }
+       }
+    `,
+  });
+
+  const result = host.run(`calldiff diff ${from} ${to}`);
+
+  expect(result.code).toBe(0);
+  expect(result.stdout).toContain(diffOutdent(`
+      creates_a_session()
+      ├─ arrange()
+      ├─ create_session()
+    + └─ assert_session()
+  `));
+  expect(result.stdout).toContain(diffOutdent(`
+      rejects_a_session()
+      ├─ arrange()
+      ├─ reject_session()
+    + └─ assert_rejection()
+  `));
+});

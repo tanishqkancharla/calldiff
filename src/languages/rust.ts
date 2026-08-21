@@ -274,6 +274,33 @@ function handleImpl(
   }
 }
 
+function handleModule(
+  file: string,
+  node: SyntaxNode,
+  functions: FunctionInfo[],
+) {
+  const list = childByType(node, "declaration_list");
+  if (!list) return;
+
+  for (const item of namedChildren(list)) {
+    visit(file, item, functions);
+  }
+}
+
+function visit(file: string, node: SyntaxNode, functions: FunctionInfo[]) {
+  if (node.type === "function_item") {
+    handleFunctionItem(file, node, null, functions);
+    return;
+  }
+  if (node.type === "impl_item") {
+    handleImpl(file, node, functions);
+    return;
+  }
+  if (node.type === "mod_item") {
+    handleModule(file, node, functions);
+  }
+}
+
 function extractFromTree(
   file: string,
   _source: string,
@@ -281,11 +308,7 @@ function extractFromTree(
 ): FunctionInfo[] {
   const functions: FunctionInfo[] = [];
   for (const stmt of namedChildren(tree.rootNode)) {
-    if (stmt.type === "function_item") {
-      handleFunctionItem(file, stmt, null, functions);
-    } else if (stmt.type === "impl_item") {
-      handleImpl(file, stmt, functions);
-    }
+    visit(file, stmt, functions);
   }
   return functions;
 }
