@@ -125,6 +125,56 @@ test("go: receiver methods resolve to Type.Method", () => {
   `));
 });
 
+test("go: detects calls added inside function literal arguments", () => {
+  const host = workspace();
+  const from = host.commit("before", {
+    "/handler.go": src`
+       package handler
+
+       import "net/http"
+
+       type meter struct{}
+
+       func (m *meter) wrap(next http.Handler) http.Handler {
+         return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+           next.ServeHTTP(w, r)
+         })
+       }
+    `,
+  });
+  const to = host.commit("after", {
+    "/handler.go": src`
+       package handler
+
+       import "net/http"
+
+       type meter struct{}
+
+       func (m *meter) wrap(next http.Handler) http.Handler {
+         return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+           extractTags(r)
+           next.ServeHTTP(w, r)
+         })
+       }
+
+       func extractTags(r *http.Request) {
+         r.Header.Values("X-Request-Tags")
+       }
+    `,
+  });
+
+  const result = host.run(`calldiff diff ${from} ${to} -e meter.wrap`);
+
+  expect(result.code).toBe(0);
+  expect(result.stdout).toContain(diffOutdent(`
+      meter.wrap(next)
+      └─ http.HandlerFunc()
+    +    ├─ extractTags(r)
+    +    │  └─ r.Header.Values()
+         └─ next.ServeHTTP()
+  `));
+});
+
 test("go: else-if and switch as branches; skips nested funcs", () => {
   const host = workspace();
   const from = host.commit("before", {
