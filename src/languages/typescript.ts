@@ -248,7 +248,11 @@ function collectStatements(
 
     if (type === "call_expression" || type === "new_expression") {
       const isNew = type === "new_expression";
-      const callee = node.namedChild(0);
+      const outerCallee = node.namedChild(0);
+      const callee =
+        outerCallee?.type === "await_expression"
+          ? outerCallee.namedChild(0)
+          : outerCallee;
       const bare = callee ? calleeKey(callee, isNew ? null : className) : null;
       const key =
         bare && isNew && !bare.startsWith("new ") ? `new ${bare}` : bare;

@@ -66,6 +66,30 @@ describe("callstack tree", () => {
     `.trimEnd());
   });
 
+  test("keeps the callee of an awaited call with type arguments", () => {
+    const host = workspace({
+      "/file.ts": src`
+        export async function createObject(spaceId: string) {
+          return await apiFetch<unknown>(routes.create(spaceId), {
+            method: "POST",
+          });
+        }
+        async function apiFetch<T>(_path: string, _options: object) {
+          return null as T;
+        }
+        const routes = { create: (id: string) => id };
+      `,
+    });
+
+    const result = host.run("calldiff tree -e createObject");
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain(src`
+      createObject(spaceId)
+      └─ apiFetch(_path, _options)
+         └─ routes.create()
+    `.trimEnd());
+  });
+
   test("respects maxDepth", () => {
     const host = workspace({
       "/file.ts": src`
