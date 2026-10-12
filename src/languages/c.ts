@@ -7,6 +7,7 @@ import {
   collapseWs,
   locFromNode,
   namedChildren,
+  sameNode,
   type LanguageExtractor,
   type SyntaxNode,
   type Tree,
@@ -26,7 +27,7 @@ function unwrapDeclarator(node: SyntaxNode | null): SyntaxNode | null {
       childByType(cur, "parenthesized_declarator") ??
       childByType(cur, "array_declarator") ??
       null;
-    if (!next || next === cur) break;
+    if (!next || sameNode(next, cur)) break;
     cur = next;
   }
   return cur?.type === "function_declarator" ? cur : null;
@@ -180,7 +181,7 @@ function collectStatements(file: string, statements: SyntaxNode[]): CallStep[] {
           if (clause.type !== "case_statement") continue;
           const value = clause.childForFieldName("value");
           const kids = namedChildren(clause).filter(
-            (c) => c !== value && c.type !== "break_statement",
+            (c) => !sameNode(c, value) && c.type !== "break_statement",
           );
           if (value) {
             const text = collapseWs(value.text);

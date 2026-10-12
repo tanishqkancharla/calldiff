@@ -7,6 +7,7 @@ import {
   collapseWs,
   locFromNode,
   namedChildren,
+  sameNode,
   type LanguageExtractor,
   type SyntaxNode,
   type Tree,
@@ -107,13 +108,13 @@ function collectStatements(file: string, statements: SyntaxNode[]): CallStep[] {
       );
       const consequent = kids.filter(
         (c) =>
-          c !== test &&
+          !sameNode(c, test) &&
           c.type !== "else_clause" &&
           c.type !== "elif_clause" &&
           c.type !== "test_command",
       );
       // If first kid is the condition already captured as test, drop it from consequent
-      const thenStmts = consequent.filter((c) => c !== cond);
+      const thenStmts = consequent.filter((c) => !sameNode(c, cond));
 
       steps.push({
         type: "branch",
@@ -128,7 +129,7 @@ function collectStatements(file: string, statements: SyntaxNode[]): CallStep[] {
         const elifTest =
           childByType(clause, "test_command") ?? elifKids[0] ?? null;
         const text = elifTest ? collapseWs(elifTest.text) : "";
-        const body = elifKids.filter((c) => c !== elifTest);
+        const body = elifKids.filter((c) => !sameNode(c, elifTest));
         steps.push({
           type: "branch",
           key: text ? `else-if:${text}` : "else-if",
@@ -165,7 +166,7 @@ function collectStatements(file: string, statements: SyntaxNode[]): CallStep[] {
               c.type === "ansi_c_string",
           ) ?? kids[0] ?? null;
         const text = pattern ? collapseWs(pattern.text) : "";
-        const body = kids.filter((c) => c !== pattern);
+        const body = kids.filter((c) => !sameNode(c, pattern));
         steps.push({
           type: "branch",
           key: text ? `case:${text}` : "case",

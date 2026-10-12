@@ -7,6 +7,7 @@ import {
   collapseWs,
   locFromNode,
   namedChildren,
+  sameNode,
   type LanguageExtractor,
   type SyntaxNode,
   type Tree,
@@ -79,10 +80,13 @@ function collectIf(
   const kids = namedChildren(node);
   const consequent = kids.find((c) => c.type === "block") ?? null;
   const alt =
-    kids.find((c) => c !== consequent && (c.type === "block" || c.type === "if_statement")) ??
-    null;
+    kids.find(
+      (c) =>
+        !sameNode(c, consequent) &&
+        (c.type === "block" || c.type === "if_statement"),
+    ) ?? null;
   const before = consequent
-    ? kids.slice(0, kids.indexOf(consequent))
+    ? kids.slice(0, kids.findIndex((c) => sameNode(c, consequent)))
     : kids;
   const condNode = before[before.length - 1] ?? null;
   const condText = condNode ? collapseWs(condNode.text) : "";
@@ -252,10 +256,10 @@ function collectStatements(
         const key = calleeKey(callee, receiverType, receiverName);
         if (key) addCall(key, node, inlineChildren);
       }
-      // Do not walk into func_literal callees/bodies
+      // Do not walk into func_literal callees/bodies. Other callees are walked:
+      // `a().b()` holds the call `a()` inside its selector.
       for (const child of namedChildren(node)) {
         if (child.type === "func_literal") continue;
-        if (child === callee) continue;
         walk(child);
       }
       return;

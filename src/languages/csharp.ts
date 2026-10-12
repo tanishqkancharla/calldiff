@@ -7,6 +7,7 @@ import {
   collapseWs,
   locFromNode,
   namedChildren,
+  sameNode,
   type LanguageExtractor,
   type SyntaxNode,
   type Tree,
@@ -231,7 +232,7 @@ function collectStatements(
             .some((c) => c?.type === "default" || c?.text === "default");
           const stmts = namedChildren(section).filter(
             (c) =>
-              c !== pattern &&
+              !sameNode(c, pattern) &&
               c.type !== "break_statement" &&
               c.type !== "constant_pattern" &&
               c.type !== "declaration_pattern" &&

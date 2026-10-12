@@ -8,6 +8,7 @@ import {
   collapseWs,
   locFromNode,
   namedChildren,
+  sameNode,
   type LanguageExtractor,
   type SyntaxNode,
   type Tree,
@@ -189,7 +190,7 @@ function collectStatements(
               c.type === "identifier",
           ) ?? kids[kids.length - 1] ?? null;
         const pattern =
-          kids.find((c) => c !== bodyNode) ?? null;
+          kids.find((c) => !sameNode(c, bodyNode)) ?? null;
         const isElse = !pattern;
         const text = pattern ? collapseWs(pattern.text) : "";
         steps.push({
