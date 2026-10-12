@@ -562,6 +562,79 @@ function unwrapCurriedBody(body: SyntaxNode | null): SyntaxNode | null {
   return current;
 }
 
+/** Static member name for an object-literal key, or null when computed. */
+function memberKey(node: SyntaxNode): string | null {
+  if (node.type === "property_identifier") return node.text;
+  if (node.type === "string") return node.text.replace(/^['"]|['"]$/g, "");
+  return null;
+}
+
+/**
+ * Functions written as object-literal properties, keyed `<owner>.<prop>` so
+ * they resolve the way class methods do: `const tool = { run: () => x }` is
+ * callable as `tool.run`, and a module that exports only an object literal
+ * still yields entrypoints. Nested object literals extend the prefix.
+ */
+function extractObjectLiteralFunctions(
+  file: string,
+  object: SyntaxNode,
+  ownerName: string,
+  exported: boolean,
+  functions: FunctionInfo[],
+  local = false,
+): void {
+  for (const member of namedChildren(object)) {
+    if (member.type === "pair") {
+      const keyNode = member.namedChild(0);
+      const valueNode = member.namedChild(1);
+      const name = keyNode ? memberKey(keyNode) : null;
+      if (!name || !valueNode) continue;
+      const value = stripParens(valueNode);
+      const key = `${ownerName}.${name}`;
+      if (isCallback(value.type)) {
+        // A `function` value binds `this` to the object; an arrow does not.
+        handleFunctionNode(
+          file,
+          value,
+          key,
+          exported,
+          null,
+          functions,
+          local,
+          value.type === "arrow_function" ? null : ownerName,
+        );
+      } else if (value.type === "object") {
+        extractObjectLiteralFunctions(
+          file,
+          value,
+          key,
+          exported,
+          functions,
+          local,
+        );
+      }
+      continue;
+    }
+
+    if (member.type === "method_definition") {
+      const keyNode = childByType(member, "property_identifier");
+      const name = keyNode ? memberKey(keyNode) : null;
+      if (name) {
+        handleFunctionNode(
+          file,
+          member,
+          `${ownerName}.${name}`,
+          exported,
+          null,
+          functions,
+          local,
+          ownerName,
+        );
+      }
+    }
+  }
+}
+
 /**
  * Register definitions declared inside a function body.
  *
@@ -621,6 +694,17 @@ function collectLocalDefinitions(
               true,
             );
           }
+          const object = childByType(d, "object");
+          if (id && object) {
+            extractObjectLiteralFunctions(
+              file,
+              object,
+              id.text,
+              false,
+              functions,
+              true,
+            );
+          }
         }
         // Fall through: `walk` skips the initializer bodies as fn-like below,
         // so a declaration list is never registered twice.
@@ -645,6 +729,8 @@ function handleFunctionNode(
   functions: FunctionInfo[],
   /** Declared inside another body: key stays bare and resolution is file-scoped. */
   local = false,
+  /** What `this` names inside the body; an object-literal method binds its object. */
+  thisOwner: string | null = className,
 ) {
   if (!name) return;
   const key = className && !local ? `${className}.${name}` : name;
@@ -658,10 +744,10 @@ function handleFunctionNode(
     exported,
     node.startIndex,
     node.endIndex,
-    className,
+    thisOwner,
   );
   functions.push(local ? { ...info, local: true } : info);
-  collectLocalDefinitions(file, body, className, functions);
+  collectLocalDefinitions(file, body, thisOwner, functions);
 }
 
 function handleClass(
@@ -770,6 +856,17 @@ function visitStatement(
       handleClass(file, decl, true, functions);
       return;
     }
+    // `export default { start() {...} }` — keyed by the file stem, as in TS.
+    if (decl.type === "object" && isDefault) {
+      extractObjectLiteralFunctions(
+        file,
+        decl,
+        file.replace(/\.[^./]+$/, ""),
+        true,
+        functions,
+      );
+      return;
+    }
     if (
       decl.type === "lexical_declaration" ||
       decl.type === "variable_declaration"
@@ -805,6 +902,16 @@ function visitStatement(
         childByType(d, "function_expression");
       if (id && init) {
         handleFunctionNode(file, init, id.text, exported, null, functions);
+      }
+      const object = childByType(d, "object");
+      if (id && object) {
+        extractObjectLiteralFunctions(
+          file,
+          object,
+          id.text,
+          exported,
+          functions,
+        );
       }
     }
   }

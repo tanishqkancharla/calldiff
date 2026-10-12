@@ -2,6 +2,7 @@ import {
   allFunctions,
   definitionsInFile,
   fileScopedKey,
+  snapshotFiles,
   type FunctionIndex,
 } from "./extract.js";
 import { pickLoc } from "./loc.js";
@@ -12,8 +13,14 @@ export function normalizeEntryPath(entry: string): string {
   return entry.replace(/\\/g, "/").replace(/^\.\//, "");
 }
 
-/** Unique source paths present in an index. */
+/**
+ * Unique source paths resolvable as `--file` entrypoints for an index. Prefers
+ * the snapshot's file list, so a file that exists but produced no definitions
+ * still resolves and reports "no exported entrypoints" rather than "not found".
+ */
 export function indexedFiles(index: FunctionIndex): string[] {
+  const files = snapshotFiles(index);
+  if (files) return files;
   return [...new Set(allFunctions(index).map((fn) => fn.file))].sort();
 }
 

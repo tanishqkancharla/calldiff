@@ -218,4 +218,24 @@ describe("CLI --file entrypoints", () => {
       /No exported entrypoints/,
     );
   });
+
+  test("distinguishes a file with nothing callable from a missing file", () => {
+    const host = workspace({
+      "/src/values.ts": src`
+        export const VERSION = "1";
+        export type Mode = "a" | "b";
+      `,
+    });
+
+    const result = host.run("calldiff tree --file src/values.ts");
+    expect(result.code).not.toBe(0);
+    // The path resolves to a real file, so the failure is about its contents —
+    // not a bogus "file not found".
+    expect(`${result.stdout}\n${result.stderr}`).toMatch(
+      /No exported entrypoints/,
+    );
+    expect(`${result.stdout}\n${result.stderr}`).not.toMatch(
+      /Entrypoint file not found/,
+    );
+  });
 });
