@@ -95,6 +95,9 @@ const indexDefinitions = new WeakMap<FunctionIndex, FunctionInfo[]>();
  */
 const indexByFile = new WeakMap<FunctionIndex, Map<string, FunctionInfo[]>>();
 
+/** Snapshot paths per index, including files that produced no definitions. */
+const indexSnapshotFiles = new WeakMap<FunctionIndex, string[]>();
+
 /** NUL cannot occur in a path or a symbol key, so it is a safe separator. */
 export function fileScopedKey(file: string, key: string): string {
   return `${file}\0${key}`;
@@ -143,7 +146,15 @@ export function definitionsInFile(
   );
 }
 
-export function buildIndex(functions: FunctionInfo[]): FunctionIndex {
+/** Source paths the index was built from, when the snapshot list was known. */
+export function snapshotFiles(index: FunctionIndex): string[] | undefined {
+  return indexSnapshotFiles.get(index);
+}
+
+export function buildIndex(
+  functions: FunctionInfo[],
+  files?: Iterable<string>,
+): FunctionIndex {
   const index: FunctionIndex = new Map();
   const byFile = new Map<string, FunctionInfo[]>();
 
@@ -177,5 +188,6 @@ export function buildIndex(functions: FunctionInfo[]): FunctionIndex {
 
   indexDefinitions.set(index, functions.slice());
   indexByFile.set(index, byFile);
+  if (files) indexSnapshotFiles.set(index, [...new Set(files)].sort());
   return index;
 }

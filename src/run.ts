@@ -117,7 +117,8 @@ function loadIndex(
   for (const file of files) {
     functions.push(...(extracted.get(file.path) ?? []));
   }
-  return buildIndex(functions);
+  // Snapshot paths, so --file can tell "missing" from "parsed to nothing".
+  return buildIndex(functions, files.map((file) => file.path));
 }
 
 /** Resolve `-e` symbols to concrete definitions. */
