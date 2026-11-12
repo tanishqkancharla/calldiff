@@ -7,6 +7,7 @@ import {
   collapseWs,
   locFromNode,
   namedChildren,
+  sameNode,
   type LanguageExtractor,
   type SyntaxNode,
   type Tree,
@@ -79,7 +80,7 @@ function calleeKey(node: SyntaxNode, typeName: string | null): string | null {
     const typeNode =
       namedChildren(node).find((c) => c.type === "type_identifier") ??
       namedChildren(node).find(
-        (c) => c.type === "identifier" && c !== nameNode,
+        (c) => c.type === "identifier" && !sameNode(c, nameNode),
       ) ??
       null;
     if (typeNode) {

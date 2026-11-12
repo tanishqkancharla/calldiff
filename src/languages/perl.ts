@@ -12,6 +12,7 @@ import {
   collapseWs,
   locFromNode,
   namedChildren,
+  sameNode,
   type LanguageExtractor,
   type SyntaxNode,
   type Tree,
@@ -324,7 +325,9 @@ function collectNode(scope: Scope, node: SyntaxNode): CallStep[] {
       const kids = namedChildren(node);
       const right = kids.at(-1);
       return kids.flatMap((c) =>
-        c === right ? collectExpression(scope, c) : collectNode(scope, c),
+        sameNode(c, right)
+          ? collectExpression(scope, c)
+          : collectNode(scope, c),
       );
     }
     case "return_expression":
@@ -422,7 +425,7 @@ function collectFunctionCall(scope: Scope, node: SyntaxNode) {
 
   // legacy indirect-object constructor (always paren-less): `new Foo(1)` -> `Foo->new(1)`
   if (node.type === "ambiguous_function_call_expression" && fnText === "new") {
-    const target = namedChildren(node).find((c) => c !== fn);
+    const target = namedChildren(node).find((c) => !sameNode(c, fn));
     const cls = target === undefined ? null : constructedClass(target);
     if (target !== undefined && cls !== null) {
       const constructorArgSteps =
@@ -441,7 +444,7 @@ function collectFunctionCall(scope: Scope, node: SyntaxNode) {
   // indirect_object block (`helper { ... } 3`): callback, not caller body
   const key = calleeKey(node, scope.packageName);
   const argumentSteps = namedChildren(node)
-    .filter((c) => c !== fn && c !== io)
+    .filter((c) => !sameNode(c, fn) && !sameNode(c, io))
     .flatMap((c) => collectNode(scope, c));
 
   if (key === null) return argumentSteps;
@@ -453,7 +456,7 @@ function collectMethodCall(scope: Scope, node: SyntaxNode) {
   const method = childByType(node, "method");
   const key = methodCallKey(node, scope.packageName);
   const receiverAndArgSteps = namedChildren(node)
-    .filter((c) => c !== method)
+    .filter((c) => !sameNode(c, method))
     .flatMap((c) => collectNode(scope, c));
 
   if (key === null) return receiverAndArgSteps;
