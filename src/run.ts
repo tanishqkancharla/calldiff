@@ -17,6 +17,7 @@ import {
   visitWorktreeFiles,
 } from "./git.js";
 import {
+  changeSet,
   diffEntry,
   diffPinnedEntry,
   inferEntryDiffs,
@@ -51,6 +52,11 @@ export type DiffRunOptions = {
   color?: boolean;
   /** When true, append file:line suffixes in ascii. Default: false */
   locs?: boolean;
+  /**
+   * Expand every callee, including unchanged and repeated ones. Default:
+   * false — those are collapsed (`…` / `↑`), which keeps wide diffs small.
+   */
+  full?: boolean;
 };
 
 export type TreeRunOptions = {
@@ -198,6 +204,7 @@ function serializeDiffNode(node: DiffNode): DiffNode {
     status: node.status,
     children: node.children.map(serializeDiffNode),
   };
+  if (node.collapsed) serialized.collapsed = node.collapsed;
   return assignOptionalTreeFields(serialized, node);
 }
 
@@ -209,6 +216,7 @@ export function runDiff(options: DiffRunOptions = {}): DiffResult {
   const filesOpt = options.files ?? [];
   const color = options.color !== false;
   const locs = options.locs === true;
+  const full = options.full === true;
   const hasExplicit = entriesOpt.length > 0 || filesOpt.length > 0;
 
   assertGitRepo(cwd);
@@ -258,6 +266,7 @@ export function runDiff(options: DiffRunOptions = {}): DiffResult {
       entriesOpt,
       filesOpt,
     );
+    const changes = full ? undefined : changeSet(before, after, maxDepth);
     for (const item of explicit) {
       const diff = item.file
         ? diffPinnedEntry(
@@ -267,13 +276,14 @@ export function runDiff(options: DiffRunOptions = {}): DiffResult {
             before,
             after,
             maxDepth,
+            changes,
           )
-        : diffEntry(item.key, before, after, maxDepth);
+        : diffEntry(item.key, before, after, maxDepth, changes);
       if (!diff) continue;
       pushDiff(item.key, diff);
     }
   } else {
-    const inferred = inferEntryDiffs(before, after, maxDepth);
+    const inferred = inferEntryDiffs(before, after, maxDepth, { full });
     if (inferred.length === 0) {
       const message = `No callstack changes between ${fromLabel} and ${toLabel}.`;
       return {

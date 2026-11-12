@@ -160,7 +160,7 @@ test("perl: qualified dispatch and nested packages resolve to dotted keys", () =
     `,
   });
 
-  const result = host.run(`calldiff diff ${from} ${to} -e Child.create`);
+  const result = host.run(`calldiff diff ${from} ${to} -e Child.create --full`);
 
   expect(result.code).toBe(0);
   expect(result.stdout).toContain(diffOutdent(`
@@ -459,7 +459,7 @@ test("perl: 5.38 class methods resolve like package subs", () => {
     `,
   });
 
-  const result = host.run(`calldiff diff ${from} ${to} -e Counter.increment`);
+  const result = host.run(`calldiff diff ${from} ${to} -e Counter.increment --full`);
 
   expect(result.code).toBe(0);
   expect(result.stdout).toContain(diffOutdent(`

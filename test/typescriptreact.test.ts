@@ -128,7 +128,7 @@ test("typescriptreact: diffs React component trees", () => {
     `,
   });
 
-  const result = host.run(`calldiff diff ${from} ${to} -e UserProfile`);
+  const result = host.run(`calldiff diff ${from} ${to} -e UserProfile --full`);
 
   expect(result.code).toBe(0);
   expect(result.stdout).toContain(diffOutdent(`

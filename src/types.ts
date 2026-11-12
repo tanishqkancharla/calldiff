@@ -56,6 +56,11 @@ export interface DiffNode {
   label: string;
   status: DiffStatus;
   kind?: CallNodeKind;
+  /**
+   * Callee not expanded: `unchanged` — its call tree is identical on both
+   * sides; `repeat` — already expanded above in this entry.
+   */
+  collapsed?: "unchanged" | "repeat";
   file?: string;
   line?: number;
   endLine?: number;

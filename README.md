@@ -84,6 +84,8 @@ calldiff mcp add      # register as MCP server
 
 If you omit `--entry` / `--file`, calldiff infers exported functions whose expanded call trees changed (and may show several).
 
+Only what changed is expanded. A callee whose call tree is the same in both refs shows as `name …`; a definition already expanded above in the same entry shows as `name ↑`. Pass `--full` to expand every callee — on a wide diff that output can run to millions of lines.
+
 `--file` / `-F` takes an indexed source path and expands to every **exported** symbol defined in that file (useful in monorepos). Matching is exact path, or a unique suffix (`boot.ts` → `packages/api/src/boot.ts`). Ambiguous matches error so you can pass a more specific path. `--entry` / `-e` is symbols only.
 
 ### `tree`
@@ -115,6 +117,8 @@ Prints every call path from the entrypoint to the target (including alternate `i
 - `new ClassName` — constructor / `new` call
 - `Component` — JSX/TSX component tags (`<Button />`); children nest under the parent
 - `if (cond)` / `else` / `else if (cond)` — conditional arms (no continuing `│` rail)
+- `name …` — `diff` only: callee not expanded because its call tree did not change (`--full` expands it)
+- `name ↑` — `diff` only: already expanded above in this entry, where it showed a change (reached through other callers it can differ further; `--full` shows every occurrence)
 - `file:line` — call-site (or root definition) location; enable with `--locs` (default off)
 
 ### Supported languages

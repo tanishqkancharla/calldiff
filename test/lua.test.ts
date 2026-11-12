@@ -282,7 +282,7 @@ test("lua: colon and dot method calls both resolve to Type.method", () => {
     `,
   });
 
-  const result = host.run(`calldiff diff ${from} ${to} -e boot`);
+  const result = host.run(`calldiff diff ${from} ${to} -e boot --full`);
 
   expect(result.code).toBe(0);
   expect(result.stdout).toContain(diffOutdent(`
@@ -326,7 +326,7 @@ test("lua: dotted Type.method definitions expand", () => {
     `,
   });
 
-  const result = host.run(`calldiff diff ${from} ${to} -e boot`);
+  const result = host.run(`calldiff diff ${from} ${to} -e boot --full`);
 
   expect(result.code).toBe(0);
   expect(result.stdout).toContain(diffOutdent(`

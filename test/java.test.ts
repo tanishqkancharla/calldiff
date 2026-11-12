@@ -422,7 +422,7 @@ test("java: static Class.method calls expand", () => {
     `,
   });
 
-  const result = host.run(`calldiff diff ${from} ${to} -e App.run`);
+  const result = host.run(`calldiff diff ${from} ${to} -e App.run --full`);
 
   expect(result.code).toBe(0);
   expect(result.stdout).toContain(diffOutdent(`

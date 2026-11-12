@@ -25,6 +25,7 @@ Diff call stacks between two git trees
 | `--file` | `unknown` |  | Entrypoint file(s): indexed source path; expands to that file's exports |
 | `--maxDepth` | `number` | `12` | Max call-tree depth |
 | `--locs` | `boolean` | `false` | Show call-site source locations (file:line) |
+| `--full` | `boolean` |  | Expand unchanged and repeated callees too (default: collapsed as … / ↑) |
 | `--from` | `string` |  | Left / "before" tree |
 | `--to` | `string` |  | Right / "after" tree |
 

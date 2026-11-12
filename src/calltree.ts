@@ -121,7 +121,7 @@ export function resolveCall(
   return index.get(key);
 }
 
-function displayCallLabel(
+export function displayCallLabel(
   key: string,
   index: FunctionIndex,
   info?: FunctionInfo,
