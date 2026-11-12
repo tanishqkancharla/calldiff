@@ -19,7 +19,7 @@ import {
 import {
   diffEntry,
   diffPinnedEntry,
-  inferEntries,
+  inferEntryDiffs,
   resolveExplicitDiffEntries,
 } from "./infer.js";
 import { collectPathsTo, findReachPaths } from "./reach.js";
@@ -273,8 +273,8 @@ export function runDiff(options: DiffRunOptions = {}): DiffResult {
       pushDiff(item.key, diff);
     }
   } else {
-    const entries = inferEntries(before, after, [], maxDepth);
-    if (entries.length === 0) {
+    const inferred = inferEntryDiffs(before, after, maxDepth);
+    if (inferred.length === 0) {
       const message = `No callstack changes between ${fromLabel} and ${toLabel}.`;
       return {
         mode: "diff",
@@ -286,11 +286,7 @@ export function runDiff(options: DiffRunOptions = {}): DiffResult {
       };
     }
 
-    for (const entry of entries) {
-      const diff = diffEntry(entry, before, after, maxDepth);
-      if (!diff) continue;
-      pushDiff(entry, diff);
-    }
+    for (const { entry, diff } of inferred) pushDiff(entry, diff);
   }
 
   if (trees.length === 0) {

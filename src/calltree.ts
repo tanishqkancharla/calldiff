@@ -99,7 +99,7 @@ function declaredInside(fn: FunctionInfo, owner?: FunctionInfo): boolean {
  * Falls back to the global map, which is what callers across file boundaries
  * (the common case) rely on.
  */
-function resolveCall(
+export function resolveCall(
   key: string,
   index: FunctionIndex,
   callSite?: { file?: string; line?: number },
