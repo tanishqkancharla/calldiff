@@ -1,60 +1,108 @@
 import type { FunctionIndex } from "./extract.js";
-import { allFunctions, flattenCallKeys } from "./extract.js";
+import { allFunctions, definitionsInFile, fileScopedKey } from "./extract.js";
 import {
   buildCallTree,
   buildCallTreeFromInfo,
   exportsInFile,
   indexedFiles,
+  resolveCall,
   resolveEntry,
   resolveEntrypointFile,
 } from "./calltree.js";
 import { diffTrees, treeHasChanges } from "./diff.js";
-import type { CallNode, DiffNode, FunctionInfo } from "./types.js";
+import { walkDiff, type DiffSide } from "./diffwalk.js";
+import type { CallNode, CallStep, DiffNode, FunctionInfo } from "./types.js";
 
 function emptyCallTree(key: string, label: string): CallNode {
   return { key, label, children: [] };
 }
 
-function functionFingerprint(fn: FunctionInfo | undefined): string | null {
-  if (!fn) return null;
-  return JSON.stringify({ label: fn.label, steps: fn.steps });
-}
-
-function addReverseEdges(
-  reverse: Map<string, Set<string>>,
-  index: FunctionIndex,
-): void {
-  for (const [caller, fn] of index) {
-    for (const callee of flattenCallKeys(fn.steps)) {
-      let callers = reverse.get(callee);
-      if (!callers) {
-        callers = new Set();
-        reverse.set(callee, callers);
+/**
+ * Every definition a call can resolve to: extracted functions plus the
+ * `new Class` aliases {@link buildIndex} adds for constructors.
+ */
+function definitionsOf(index: FunctionIndex): FunctionInfo[] {
+  const out = new Set<FunctionInfo>();
+  for (const fn of allFunctions(index)) {
+    out.add(fn);
+    if (fn.key.endsWith(".constructor")) {
+      const newKey = `new ${fn.key.slice(0, -".constructor".length)}`;
+      for (const alias of definitionsInFile(index, fn.file, newKey)) {
+        out.add(alias);
       }
-      callers.add(caller);
     }
   }
+  for (const fn of index.values()) out.add(fn);
+  return [...out];
 }
 
-function findAffected(
-  before: FunctionIndex,
-  after: FunctionIndex,
+type DefinitionGraph = {
+  /** Identity that survives line shifts: file, key, rank among that file's same-key definitions. */
+  id: (fn: FunctionInfo) => string;
+  /** Call body without source locations, each call tagged with the definition it resolves to. */
+  bodies: Map<string, string>;
+  /** Resolved call edges: callee id → caller ids. */
+  callers: Map<string, Set<string>>;
+};
+
+/**
+ * Build the resolved definition graph for one snapshot.
+ *
+ * A call tree only depends on call keys, branch keys and which definition each
+ * call resolves to — never on line numbers — so that is all a body records.
+ */
+function definitionGraph(index: FunctionIndex): DefinitionGraph {
+  const ids = new Map<FunctionInfo, string>();
+  const id = (fn: FunctionInfo): string => {
+    let value = ids.get(fn);
+    if (value === undefined) {
+      const rank = definitionsInFile(index, fn.file, fn.key).indexOf(fn);
+      value = `${fileScopedKey(fn.file, fn.key)}\0${rank}`;
+      ids.set(fn, value);
+    }
+    return value;
+  };
+  const bodies = new Map<string, string>();
+  const callers = new Map<string, Set<string>>();
+
+  for (const fn of definitionsOf(index)) {
+    const self = id(fn);
+    const encode = (steps: CallStep[]): unknown[] =>
+      steps.map((step) => {
+        if (step.type === "branch") {
+          return ["b", step.key, encode(step.children)];
+        }
+        const target = resolveCall(step.key, index, step, fn);
+        const targetId = target ? id(target) : null;
+        if (targetId) {
+          let set = callers.get(targetId);
+          if (!set) {
+            set = new Set();
+            callers.set(targetId, set);
+          }
+          set.add(self);
+        }
+        return ["c", step.key, targetId, step.children ? encode(step.children) : 0];
+      });
+    bodies.set(self, JSON.stringify(encode(fn.steps)));
+  }
+
+  return { id, bodies, callers };
+}
+
+/** Definitions whose body changed, plus their callers up to `maxDepth` calls away. */
+function affectedDefinitions(
+  before: DefinitionGraph,
+  after: DefinitionGraph,
   maxDepth: number,
 ): Set<string> {
-  const keys = new Set([...before.keys(), ...after.keys()]);
-  const reverse = new Map<string, Set<string>>();
-  addReverseEdges(reverse, before);
-  addReverseEdges(reverse, after);
-
   const distance = new Map<string, number>();
   const queue: string[] = [];
 
-  for (const key of keys) {
-    if (functionFingerprint(before.get(key)) === functionFingerprint(after.get(key))) {
-      continue;
-    }
-    distance.set(key, 0);
-    queue.push(key);
+  for (const id of new Set([...before.bodies.keys(), ...after.bodies.keys()])) {
+    if (before.bodies.get(id) === after.bodies.get(id)) continue;
+    distance.set(id, 0);
+    queue.push(id);
   }
 
   for (let i = 0; i < queue.length; i += 1) {
@@ -62,26 +110,123 @@ function findAffected(
     const nextDistance = distance.get(callee)! + 1;
     if (nextDistance > maxDepth) continue;
 
-    for (const caller of reverse.get(callee) ?? []) {
-      const previous = distance.get(caller);
-      if (previous !== undefined && previous <= nextDistance) continue;
-      distance.set(caller, nextDistance);
-      queue.push(caller);
+    for (const graph of [before, after]) {
+      for (const caller of graph.callers.get(callee) ?? []) {
+        if (distance.has(caller)) continue;
+        distance.set(caller, nextDistance);
+        queue.push(caller);
+      }
     }
   }
 
   return new Set(distance.keys());
 }
 
-function changedKeys(
+/** What changed between two snapshots, at definition granularity. */
+export type ChangeSet = {
+  before: DiffSide;
+  after: DiffSide;
+  /** Definitions whose call tree may differ: changed, or calling a changed one within maxDepth. */
+  affected: Set<string>;
+};
+
+export function changeSet(
+  before: FunctionIndex,
+  after: FunctionIndex,
+  maxDepth: number,
+): ChangeSet {
+  const beforeGraph = definitionGraph(before);
+  const afterGraph = definitionGraph(after);
+  return {
+    before: { index: before, id: beforeGraph.id },
+    after: { index: after, id: afterGraph.id },
+    affected: affectedDefinitions(beforeGraph, afterGraph, maxDepth),
+  };
+}
+
+/**
+ * Index keys whose expanded call tree may differ between the snapshots.
+ *
+ * A superset of the keys {@link diffEntry} reports as changed: a tree can only
+ * change when its root resolves to a different definition, or when a
+ * definition it reaches changed body. Line shifts alone never qualify.
+ */
+export function affectedEntries(
+  before: FunctionIndex,
+  after: FunctionIndex,
+  maxDepth: number,
+  changes: ChangeSet = changeSet(before, after, maxDepth),
+): string[] {
+  const { affected } = changes;
+
+  const keys: string[] = [];
+  for (const key of new Set([...before.keys(), ...after.keys()])) {
+    if (key.startsWith("new ")) continue;
+    const beforeRoot = before.get(key);
+    const afterRoot = after.get(key);
+    if (!beforeRoot || !afterRoot) {
+      keys.push(key);
+      continue;
+    }
+    const beforeId = changes.before.id(beforeRoot);
+    const afterId = changes.after.id(afterRoot);
+    if (
+      beforeId !== afterId ||
+      affected.has(beforeId) ||
+      affected.has(afterId)
+    ) {
+      keys.push(key);
+    }
+  }
+  return keys.sort((a, b) => a.localeCompare(b));
+}
+
+export type InferredDiff = { entry: string; diff: DiffNode };
+
+function changedDiffs(
   keys: string[],
   before: FunctionIndex,
   after: FunctionIndex,
   maxDepth: number,
-): string[] {
-  return keys
-    .filter((key) => diffEntry(key, before, after, maxDepth) !== null)
-    .sort((a, b) => a.localeCompare(b));
+  changes: ChangeSet | undefined,
+): InferredDiff[] {
+  const found: InferredDiff[] = [];
+  for (const entry of keys) {
+    const diff = diffEntry(entry, before, after, maxDepth, changes);
+    if (diff) found.push({ entry, diff });
+  }
+  return found;
+}
+
+/**
+ * Inferred entrypoints with their diffs: exported functions whose expanded
+ * call trees differ, else any changed function.
+ *
+ * Diffs collapse unchanged and repeated callees unless `full` is set.
+ */
+export function inferEntryDiffs(
+  before: FunctionIndex,
+  after: FunctionIndex,
+  maxDepth: number,
+  options: { full?: boolean } = {},
+): InferredDiff[] {
+  const changes = changeSet(before, after, maxDepth);
+  const walk = options.full ? undefined : changes;
+  const affected = affectedEntries(before, after, maxDepth, changes);
+  const exported = affected.filter((key) =>
+    Boolean(before.get(key)?.exported || after.get(key)?.exported),
+  );
+  const found = changedDiffs(exported, before, after, maxDepth, walk);
+  if (found.length > 0) return found;
+
+  const checked = new Set(exported);
+  return changedDiffs(
+    affected.filter((key) => !checked.has(key)),
+    before,
+    after,
+    maxDepth,
+    walk,
+  );
 }
 
 /**
@@ -104,18 +249,7 @@ export function inferEntries(
     return entries;
   }
 
-  const affected = [...findAffected(before, after, maxDepth)].filter(
-    (key) => !key.startsWith("new "),
-  );
-  const exported = affected.filter((key) =>
-    Boolean(before.get(key)?.exported || after.get(key)?.exported),
-  );
-  const entries = changedKeys(exported, before, after, maxDepth);
-  if (entries.length > 0) return entries;
-
-  const checked = new Set(exported);
-  const fallback = affected.filter((key) => !checked.has(key));
-  return changedKeys(fallback, before, after, maxDepth);
+  return inferEntryDiffs(before, after, maxDepth).map((found) => found.entry);
 }
 
 export type ExplicitDiffEntry = {
@@ -180,11 +314,16 @@ export function resolveExplicitDiffEntries(
   return out;
 }
 
+/**
+ * Diff one entry. With `changes`, unchanged and repeated callees are collapsed
+ * (see `walkDiff`); without, both full trees are built and diffed.
+ */
 export function diffEntry(
   key: string,
   before: FunctionIndex,
   after: FunctionIndex,
   maxDepth: number,
+  changes?: ChangeSet,
 ): DiffNode | null {
   const beforeKey = resolveEntry(key, before) ?? key;
   const afterKey = resolveEntry(key, after) ?? key;
@@ -193,6 +332,19 @@ export function diffEntry(
   const hasAfter = after.has(afterKey);
 
   if (!hasBefore && !hasAfter) return null;
+
+  if (changes) {
+    const diff = walkDiff(
+      hasBefore ? { key: beforeKey } : null,
+      hasAfter ? { key: afterKey } : null,
+      changes.before,
+      changes.after,
+      changes.affected,
+      maxDepth,
+    );
+    if (hasBefore && hasAfter && !treeHasChanges(diff)) return null;
+    return diff;
+  }
 
   const beforeTree = hasBefore
     ? buildCallTree(beforeKey, before, maxDepth)
@@ -232,8 +384,22 @@ export function diffPinnedEntry(
   before: FunctionIndex,
   after: FunctionIndex,
   maxDepth: number,
+  changes?: ChangeSet,
 ): DiffNode | null {
   if (!beforeInfo && !afterInfo) return null;
+
+  if (changes) {
+    const diff = walkDiff(
+      beforeInfo ? { key, info: beforeInfo } : null,
+      afterInfo ? { key, info: afterInfo } : null,
+      changes.before,
+      changes.after,
+      changes.affected,
+      maxDepth,
+    );
+    if (beforeInfo && afterInfo && !treeHasChanges(diff)) return null;
+    return diff;
+  }
 
   const beforeTree = beforeInfo
     ? buildCallTreeFromInfo(beforeInfo, before, maxDepth)

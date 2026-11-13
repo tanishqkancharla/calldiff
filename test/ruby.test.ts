@@ -388,7 +388,7 @@ test("ruby: singleton class methods expand", () => {
     `,
   });
 
-  const result = host.run(`calldiff diff ${from} ${to} -e run`);
+  const result = host.run(`calldiff diff ${from} ${to} -e run --full`);
 
   expect(result.code).toBe(0);
   expect(result.stdout).toContain(diffOutdent(`

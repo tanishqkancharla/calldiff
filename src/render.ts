@@ -36,6 +36,7 @@ export interface RenderOptions {
 
 type TreeLike = {
   label: string;
+  collapsed?: DiffNode["collapsed"];
   kind?: CallNode["kind"];
   children: TreeLike[];
   status?: DiffStatus;
@@ -87,9 +88,15 @@ function renderAsciiTree(
     isRoot: boolean,
   ) => {
     const branch = isRoot ? "" : isLast ? "└─ " : "├─ ";
+    const marker =
+      node.collapsed === "unchanged"
+        ? " …"
+        : node.collapsed === "repeat"
+          ? " ↑"
+          : "";
     const label = withStatus
-      ? paintStatus(node.status ?? "same", node.label)
-      : node.label;
+      ? paintStatus(node.status ?? "same", `${node.label}${marker}`)
+      : `${node.label}${marker}`;
     const suffix = locSuffix(node);
     const line = withStatus
       ? `${statusPrefix(node.status ?? "same")} ${indent}${branch}${label}${suffix}`

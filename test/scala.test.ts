@@ -389,7 +389,7 @@ test("scala: object methods resolve as Type.method", () => {
     `,
   });
 
-  const result = host.run(`calldiff diff ${from} ${to} -e Main.boot`);
+  const result = host.run(`calldiff diff ${from} ${to} -e Main.boot --full`);
 
   expect(result.code).toBe(0);
   expect(result.stdout).toContain(diffOutdent(`

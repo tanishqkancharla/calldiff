@@ -389,7 +389,7 @@ test("kotlin: companion object and object methods", () => {
     `,
   });
 
-  const result = host.run(`calldiff diff ${from} ${to} -e boot`);
+  const result = host.run(`calldiff diff ${from} ${to} -e boot --full`);
 
   expect(result.code).toBe(0);
   expect(result.stdout).toContain(diffOutdent(`

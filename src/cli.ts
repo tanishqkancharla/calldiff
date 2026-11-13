@@ -166,6 +166,12 @@ export const cli = Cli.create("calldiff", {
       file: fileOption.optional(),
       maxDepth: maxDepthOption,
       locs: locsOption,
+      full: z
+        .boolean()
+        .optional()
+        .describe(
+          "Expand unchanged and repeated callees too (default: collapsed as … / ↑)",
+        ),
       from: z.string().optional().describe('Left / "before" tree'),
       to: z.string().optional().describe('Right / "after" tree'),
     }),
@@ -214,6 +220,7 @@ export const cli = Cli.create("calldiff", {
           paths: c.args.paths,
           maxDepth: c.options.maxDepth,
           locs: c.options.locs,
+          full: c.options.full,
           color: !c.formatExplicit && !c.agent,
         });
       } catch (error) {
